@@ -1,27 +1,39 @@
 {
   "name": "openai-sip-trunking",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Answer inbound SIP phone calls with the Azure OpenAI (Microsoft Foundry) GPT Realtime API",
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p .",
-    "start": "node dist/index.js"
+    "typecheck": "tsc -p tsconfig.scripts.json",
+    "start": "node dist/index.js",
+    "webhook:create": "tsx scripts/webhook-endpoints.ts create",
+    "webhook:list": "tsx scripts/webhook-endpoints.ts list",
+    "webhook:delete": "tsx scripts/webhook-endpoints.ts delete",
+    "webhook:test": "tsx scripts/send-test-webhook.ts"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pheathtwilio/openai-sip-trunking.git"
+    "url": "git+https://github.com/melrasheed/openai-sip-trunking.git"
   },
-  "keywords": [],
+  "keywords": [
+    "azure-openai",
+    "microsoft-foundry",
+    "realtime-api",
+    "sip",
+    "sip-trunking",
+    "voice-agent"
+  ],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/pheathtwilio/openai-sip-trunking/issues"
+    "url": "https://github.com/melrasheed/openai-sip-trunking/issues"
   },
-  "homepage": "https://github.com/pheathtwilio/openai-sip-trunking#readme",
+  "homepage": "https://github.com/melrasheed/openai-sip-trunking#readme",
   "dependencies": {
-    "body-parser": "^2.2.0",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "openai": "^5.12.1",
