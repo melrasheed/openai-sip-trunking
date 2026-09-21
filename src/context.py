@@ -10,6 +10,14 @@ import re
 
 LANGUAGE_NAMES = {"ar": "Arabic", "en": "English"}
 
+# Arabic delivery styles. The prompt text for the non-default variants lives in
+# settings so it can be edited in the console.
+ARABIC_VARIANTS = {
+    "default": "Model default",
+    "faseeh": "Faseeh (Modern Standard Arabic)",
+    "qatari": "Qatari dialect",
+}
+
 # Matches the user part of a SIP/TEL URI, e.g.
 #   sip:+97455512345@sip.example.com
 #   "Ahmed" <sip:97455512345@host>;tag=abc
@@ -76,6 +84,10 @@ def build_profile(customer):
     add("Name (English)", customer.get("full_name_en"))
     add("Name (Arabic)", customer.get("full_name_ar"))
     add("Preferred language", language)
+    if customer.get("preferred_language") == "ar":
+        variant = customer.get("arabic_variant") or "default"
+        if variant != "default":
+            add("Arabic style", ARABIC_VARIANTS.get(variant, variant))
     add("Mobile", customer.get("mobile_e164"))
     add("Segment", customer.get("segment"))
     add("Home branch", customer.get("branch"))
@@ -107,13 +119,29 @@ def language_directive(customer):
     if customer and customer.get("preferred_language") == "ar":
         return (
             "The caller's preferred language is Arabic. Greet them and hold the entire "
-            "conversation in Arabic, using Gulf dialect where it sounds natural. Switch "
-            "language only if the caller switches first."
+            "conversation in Arabic. Switch language only if the caller switches first."
         )
     return (
         "Hold the conversation in English. Switch language only if the caller asks or "
         "starts speaking another language."
     )
+
+
+def dialect_prompt(customer, prompts):
+    """The Arabic style prompt for this customer, if any.
+
+    `prompts` maps variant name to prompt text, loaded from settings so the
+    wording can be edited in the console. Only applies to Arabic speakers.
+    """
+    if not customer or customer.get("preferred_language") != "ar":
+        return None
+
+    variant = (customer.get("arabic_variant") or "default").strip()
+    if variant in ("", "default"):
+        return None
+
+    text = (prompts or {}).get(variant)
+    return text.strip() if text and text.strip() else None
 
 
 GUARDRAILS = (
@@ -126,17 +154,61 @@ GUARDRAILS = (
     "- Keep replies short and natural: this is a phone call, not a written chat."
 )
 
+DEFAULT_BANK_EN = "Commercial Bank of Qatar"
+DEFAULT_BANK_AR = "البنك التجاري"
 
-def build_instructions(base_instructions, customer):
-    """Assembles the accept-time `instructions` string."""
+
+def opening_directive(customer, bank_en, bank_ar):
+    """Tells the agent how to open the call.
+
+    Deliberately describes *intent* rather than supplying a sentence to imitate.
+    A hardcoded example would be written in one Arabic register and would then
+    fight whichever style prompt is active — a Gulf-colloquial example pulls a
+    Faseeh session off-register on its very first word.
+    """
+    arabic = customer and customer.get("preferred_language") == "ar"
+    bank = bank_ar if arabic else bank_en
+
+    if not customer:
+        return (
+            f"Open the call by greeting the caller warmly on behalf of {bank}, then ask how "
+            f"you can help. Keep it to one short sentence."
+        )
+
+    name = (
+        (customer.get("full_name_ar") or customer.get("full_name_en"))
+        if arabic
+        else customer.get("full_name_en")
+    )
+    return (
+        f"Open the call yourself, before the caller speaks: greet {name} by name on behalf of "
+        f"{bank}, then ask how you can help. Keep it to one short, natural sentence, and follow "
+        f"the language and style rules above."
+    )
+
+
+def build_instructions(
+    base_instructions,
+    customer,
+    prompts=None,
+    bank_en=DEFAULT_BANK_EN,
+    bank_ar=DEFAULT_BANK_AR,
+):
+    """Assembles the accept-time `instructions` string.
+
+    Order matters: who you are, who you are speaking to, how to speak, then the
+    rules, then how to open. The opening directive lives here rather than in a
+    per-response override because `response.create` instructions *replace* the
+    session instructions for that response — which previously stripped the
+    dialect, profile and guardrails from the agent's very first sentence.
+    """
     sections = [base_instructions.strip()]
 
     if customer:
         sections.append(build_profile(customer))
         sections.append(
             f"You already know who is calling because the call came from their registered "
-            f"mobile number. Greet {customer.get('full_name_en')} by name. Do not ask them "
-            f"to identify themselves again."
+            f"mobile number. Do not ask them to identify themselves again."
         )
     else:
         sections.append(
@@ -146,24 +218,11 @@ def build_instructions(base_instructions, customer):
         )
 
     sections.append(language_directive(customer))
+
+    style = dialect_prompt(customer, prompts)
+    if style:
+        sections.append(style)
+
     sections.append(GUARDRAILS)
+    sections.append(opening_directive(customer, bank_en, bank_ar))
     return "\n\n".join(section for section in sections if section)
-
-
-def build_greeting(customer, fallback_greeting):
-    """The line the agent opens with, passed via `response.create`."""
-    if not customer:
-        return fallback_greeting
-
-    if customer.get("preferred_language") == "ar":
-        name = customer.get("full_name_ar") or customer.get("full_name_en")
-        return (
-            f"Greet the caller in Arabic by name. Say something close to: "
-            f"أهلاً {name}، معك المساعد الذكي لبنك قطر الوطني. كيف أقدر أساعدك اليوم؟"
-        )
-
-    name = customer.get("full_name_en")
-    return (
-        f"Greet the caller in English by name. Say something close to: "
-        f"Hello {name}, thank you for calling. How can I help you today?"
-    )

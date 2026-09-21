@@ -129,14 +129,14 @@ Then open **<http://127.0.0.1:8000/>** for the console.
 | `AZURE_OPENAI_API_KEY` | ✅ | Key 1 or Key 2 from **Keys and Endpoint** |
 | `AZURE_OPENAI_DEPLOYMENT` | ✅ | Your realtime **deployment** name |
 | `AZURE_OPENAI_WEBHOOK_SECRET` | ✅ | Signing secret from the webhook registration script |
-| `AZURE_OPENAI_TRANSCRIBE_DEPLOYMENT` | – | Deployment name of a transcription model. Enables caller-side transcript |
+| `TRANSCRIPTION_MODEL` | – | Seeds the caller-transcription model on a fresh database. Defaults to `whisper`; the console owns it afterwards |
 | `WEBHOOK_PUBLIC_URL` | for registration | Public HTTPS URL of `/webhook` |
 | `WEBHOOK_NAME` | – | Friendly name for the webhook endpoint |
 | `PORT` | – | Defaults to `8000` |
 | `DATABASE_PATH` | – | Defaults to `./data/bank.db` |
 | `DEMO_CUSTOMER_MSISDN` | – | Your own number, written over the first seed record |
 | `LOG_LEVEL` | – | `INFO` or `DEBUG` |
-| `AGENT_INSTRUCTIONS` / `WELCOME_GREETING` / `AGENT_VOICE` | – | Defaults; the UI overrides these |
+| `AGENT_INSTRUCTIONS` | – | Default agent role; the console overrides it and persists to the database |
 
 The server fails fast at startup and names any missing required variable.
 
@@ -144,21 +144,30 @@ The server fails fast at startup and names any missing required variable.
 
 ## The web console
 
-Served on the same port as the webhook, so one tunnel exposes both.
+Styled after [Commercial Bank](https://www.cbq.com.qa/en) and served on the same port as the
+webhook, so one tunnel exposes both. Light and dark themes, and an Arabic toggle that flips the
+whole console to right-to-left.
 
 > ⚠️ **No authentication.** Anyone who can reach the URL — including through your dev tunnel — can
 > read and edit the customer records. It is a demo console: keep the data fictional.
 
-**Customers** — the records the agent matches against. Add, edit and delete, with Arabic names
-rendered right-to-left. "Reseed demo data" restores the eight sample customers.
+**Overview** — headline numbers (customers, calls today, recognition rate, average duration) and a
+live indicator while a call is in progress.
 
-**Calls** — every call, with the number it came from, which customer it matched, the language
-chosen, and the outcome. Select a call to read its transcript; a call still in progress updates
-live (polled once a second).
+**Customers** — the records the agent matches against, searchable by name or number. Selecting a
+row opens a slide-over editor grouped into Identity, Contact and language, Account, and Activity
+and service. Arabic names render right-to-left, and an **Arabic style** selector appears when the
+preferred language is Arabic. "Reseed" restores the eight sample customers.
 
-**Agent settings** — base instructions, fallback greeting and voice. Saved to the database and read
-at the start of every call, so edits apply to the **next** call without restarting. The preview
-panel renders the full instructions for any number you type.
+**Calls** — every call, with the number it came from, which customer it matched, and the outcome.
+Selecting a call shows the transcript as a conversation; a call in progress updates live, and an
+indicator shows whether caller transcription is arriving.
+
+**Agent settings** — instructions, greeting, the basic and advanced realtime settings, and the
+editable Arabic style prompts. The preview panel renders the exact instructions and audio payload
+that any number would produce, without placing a call.
+
+Each view is deep-linkable: `?view=customers`, `?view=calls`, `?view=settings`.
 
 ### Making your own phone recognised
 
@@ -269,9 +278,13 @@ python scripts/send_test_webhook.py --from +14155550123
 
 ```
 src/
-  app.py                Flask: webhook, JSON API, UI route, realtime monitor
-  db.py                 SQLite schema, seed data, queries
-  context.py            SIP header parsing, number matching, profile builder
+  app.py                Flask: webhook, JSON API, console route, realtime monitor
+  db.py                 SQLite schema, migrations, seed data, queries
+  context.py            SIP header parsing, number matching, profile and dialect assembly
+  settings_spec.py      Realtime settings: defaults, ranges, accept-payload construction
+  prompts/
+    faseeh_arabic.txt   Modern Standard Arabic style prompt
+    qatari_dialect.txt  Doha dialect style prompt
   templates/
     index.html          The console (inline CSS/JS, no build step)
 scripts/
@@ -299,15 +312,122 @@ while anonymous callers (`sip:anonymous@anonymous.invalid`) correctly find nobod
 
 ---
 
+## Agent settings
+
+Everything below lives in **Agent settings** in the console. Values are stored in the database and
+read at the start of every call, so a change applies to the **next** call without a restart. Only
+values that differ from the service default are sent, keeping the accept payload minimal.
+
+### Basic
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Bank name · English | `Commercial Bank of Qatar` | How the agent refers to the bank when speaking English |
+| Bank name · Arabic | `البنك التجاري` | How the agent refers to the bank when speaking Arabic |
+| Voice · English caller | `marin` | Voice used when the caller's preferred language is English |
+| Voice · Arabic caller | `cedar` | Voice used when the caller's preferred language is Arabic |
+| Playback speed | `1.0` | Speed of the agent's speech. Range `0.25`–`1.5` |
+| Transcription model | `whisper` | Transcribes the caller. Empty disables caller transcription |
+| Transcription language hint | *(empty)* | ISO-639-1 code such as `ar`. Improves accuracy and latency |
+
+### Advanced
+
+Collapsed by default, since the demo path rarely needs it.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Turn detection | `server_vad` | `server_vad` splits on silence, `semantic_vad` waits until the caller sounds finished, `none` never cuts in automatically |
+| Speech threshold | `0.5` | How loud speech must be to register. Range `0`–`1`. Raise on a noisy line |
+| Prefix padding | `300` ms | Audio kept from before speech starts, so the first syllable is not clipped |
+| End-of-turn silence | `200` ms | Silence before the caller's turn is considered finished |
+| Semantic eagerness | `auto` | Semantic VAD only — how readily the model decides the caller has finished |
+| Reply automatically | on | Off makes the agent wait rather than answering on end of speech |
+| Allow caller to interrupt | on | Lets the caller talk over the agent |
+| Max reply tokens | `0` (no limit) | Caps the length of a single reply |
+
+Shapes and ranges above were verified against the live service. Worth knowing if you extend this:
+`temperature` and `max_response_output_tokens` are **rejected** by the GA realtime session —
+`max_output_tokens` is the supported spelling — and turn detection is switched off by sending
+`null`, not `{"type": "none"}`.
+
+---
+
+## Arabic styles
+
+A customer whose preferred language is Arabic can be given a delivery style, chosen on their
+profile:
+
+| Style | Effect |
+| --- | --- |
+| **Model default** | Leaves the model's own Arabic untouched |
+| **Faseeh** | Enforces Modern Standard Arabic — full case endings, no dialectal vocabulary, formal register |
+| **Qatari** | Enforces the Doha dialect — qaf rules, gender-aware address forms (چ / ك), mandatory substitutions |
+
+The prompt behind each style is seeded into the database from `src/prompts/` and is editable in
+**Agent settings → Arabic styles**, so the wording can be tuned without touching code. The selected
+style is appended to the instructions after the customer profile, so the agent knows who it is
+speaking to *and* how it should sound.
+
+> **Upgrading an existing database:** the `arabic_variant` column is added in place, and every
+> existing customer keeps the **Model default** style — an upgrade will not silently rewrite records
+> you have edited. To see the dialects, either press **Reseed** or set the style on a customer.
+> The server log makes the choice visible on each call:
+> `incoming from +974… -> Mohammed Al-Thani (language=ar style=qatari)`.
+
+### How the agent opens the call
+
+There is no separate greeting string. The instruction to open the call lives inside the same
+accept-time `instructions` as the profile, language directive and Arabic style, and the WebSocket
+sends a bare `response.create`:
+
+```javascript
+ws.send(JSON.stringify({ type: "response.create" }));
+```
+
+This matters. `response.create` carrying its own `instructions` **replaces** the session
+instructions for that one response — so an opening line configured that way is generated *without*
+the customer profile, the guardrails or the Arabic style. The symptom is subtle and easy to miss:
+the first sentence is in plain Arabic and every sentence afterwards is in the correct dialect.
+
+The opening directive also describes intent rather than supplying a sentence to copy, so the active
+style owns the wording instead of competing with a hardcoded example.
+
+---
+
 ## Caller-side transcript
 
-The live transcript shows the assistant's side out of the box. To also capture what the **caller**
-says, set `AZURE_OPENAI_TRANSCRIBE_DEPLOYMENT` to the name of a transcription model deployment
-(for example a `gpt-4o-transcribe` deployment).
+On by default. `TRANSCRIPTION_MODEL` is `whisper`, and the transcript records both sides of the
+conversation.
 
-> Azure requires a **deployment name** in `input_audio_transcription`, unlike OpenAI which takes a
-> model name. This is left opt-in so that a missing or wrong value cannot break an otherwise
-> working accept request.
+No separate transcription deployment is required. The Azure reference documentation notes that
+`input_audio_transcription.model` takes a deployment name, which suggests one must be created
+first — testing against a live resource shows otherwise:
+
+- `whisper` resolves in the same `/openai/v1/models` namespace as the realtime deployment that is
+  already working.
+- Session configuration is **not** validated when the call is accepted, so this block cannot cause
+  an accept to fail.
+
+The failure mode is therefore silent rather than fatal: a value the service cannot resolve simply
+produces no caller transcript. The Calls view shows **caller transcription active / not received**
+for each call so a misconfiguration is visible rather than mysterious.
+
+Azure documents **two spellings** for the transcription events, and a deployment may emit either,
+or stream deltas instead of one completed event. All of these are handled:
+
+| Event | Handling |
+| --- | --- |
+| `conversation.item.input_audio_transcription.completed` | Recorded as a caller line |
+| `conversation.item.audio_transcription.completed` | Recorded as a caller line |
+| `…transcription.delta` | Accumulated per item and flushed when the item completes |
+| `…transcription.failed` | Error written into the transcript and the log |
+| Anything else containing `transcription` with a `transcript` | Recorded anyway |
+
+Transcription events are logged in full, so if the caller transcript is still missing the log says
+which event arrived and what the service reported.
+
+If `.failed` says the model cannot be resolved, change **Transcription model** in the console —
+`gpt-4o-transcribe` is also available on this resource.
 
 ---
 

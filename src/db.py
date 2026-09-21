@@ -29,6 +29,7 @@ CUSTOMER_FIELDS = [
     "full_name_ar",
     "mobile_e164",
     "preferred_language",
+    "arabic_variant",
     "account_type",
     "balance",
     "currency",
@@ -45,6 +46,13 @@ CUSTOMER_FIELDS = [
     "loan_summary",
 ]
 
+# Columns added after the first release. Applied in place so an existing
+# database keeps its data, which matters because the operator's own mobile
+# number is usually in there.
+MIGRATIONS = [
+    ("customers", "arabic_variant", "TEXT NOT NULL DEFAULT 'default'"),
+]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS customers (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +61,7 @@ CREATE TABLE IF NOT EXISTS customers (
     mobile_e164          TEXT NOT NULL,
     mobile_digits        TEXT NOT NULL,
     preferred_language   TEXT NOT NULL DEFAULT 'en',
+    arabic_variant       TEXT NOT NULL DEFAULT 'default',
     account_type         TEXT,
     balance              REAL,
     currency             TEXT DEFAULT 'QAR',
@@ -125,6 +134,44 @@ def connect():
 def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
+    _migrate()
+    seed_prompts()
+
+
+def _migrate():
+    """Adds columns introduced after a database was first created."""
+    with _write_lock, connect() as conn:
+        for table, column, definition in MIGRATIONS:
+            existing = {
+                row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
+
+# Arabic style prompts, seeded into settings so they can be edited in the
+# console without a code change.
+PROMPT_FILES = {
+    "prompt_faseeh": "faseeh_arabic.txt",
+    "prompt_qatari": "qatari_dialect.txt",
+}
+
+
+def seed_prompts(force=False):
+    """Loads the dialect prompt files into settings if they are not there yet."""
+    for key, filename in PROMPT_FILES.items():
+        if not force and get_setting(key):
+            continue
+        path = os.path.join(PROMPTS_DIR, filename)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                set_settings({key: handle.read().strip()})
+        except OSError:
+            # A missing prompt file must not stop the app from starting; the
+            # dialect simply falls back to the model's default Arabic.
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +233,7 @@ def create_customer(data):
     values = {field: data.get(field) for field in CUSTOMER_FIELDS}
     values["full_name_ar"] = values.get("full_name_ar") or ""
     values["preferred_language"] = values.get("preferred_language") or "en"
+    values["arabic_variant"] = values.get("arabic_variant") or "default"
     values["mobile_digits"] = digits_only(values.get("mobile_e164"))
     values["created_at"] = values["updated_at"] = now_iso()
 
@@ -205,6 +253,12 @@ def update_customer(customer_id, data):
         return False
     if "mobile_e164" in values:
         values["mobile_digits"] = digits_only(values["mobile_e164"])
+    if "arabic_variant" in values:
+        values["arabic_variant"] = values["arabic_variant"] or "default"
+    if "preferred_language" in values:
+        values["preferred_language"] = values["preferred_language"] or "en"
+    if "full_name_ar" in values:
+        values["full_name_ar"] = values["full_name_ar"] or ""
     values["updated_at"] = now_iso()
 
     assignments = ", ".join(f"{column} = ?" for column in values)
@@ -254,13 +308,47 @@ def end_call(call_id, status="completed"):
 def list_calls(limit=50):
     with connect() as conn:
         rows = conn.execute(
-            """SELECT c.*, cu.full_name_en, cu.full_name_ar
+            """SELECT c.*, cu.full_name_en, cu.full_name_ar, cu.arabic_variant,
+                      (SELECT COUNT(*) FROM transcript_lines t
+                        WHERE t.call_id = c.call_id AND t.role = 'caller') AS caller_lines,
+                      (SELECT COUNT(*) FROM transcript_lines t
+                        WHERE t.call_id = c.call_id) AS total_lines
                FROM calls c
                LEFT JOIN customers cu ON cu.id = c.customer_id
                ORDER BY c.id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def stats():
+    """Headline numbers for the overview page."""
+    with connect() as conn:
+        customers = conn.execute("SELECT COUNT(*) AS n FROM customers").fetchone()["n"]
+        totals = conn.execute(
+            """SELECT COUNT(*) AS calls,
+                      SUM(matched) AS matched,
+                      SUM(CASE WHEN date(started_at) = date('now') THEN 1 ELSE 0 END) AS today
+               FROM calls"""
+        ).fetchone()
+        live = conn.execute(
+            "SELECT COUNT(*) AS n FROM calls WHERE status = 'in_progress'"
+        ).fetchone()["n"]
+        duration = conn.execute(
+            """SELECT AVG(julianday(ended_at) - julianday(started_at)) * 86400 AS seconds
+               FROM calls WHERE ended_at IS NOT NULL"""
+        ).fetchone()["seconds"]
+
+    calls = totals["calls"] or 0
+    matched = totals["matched"] or 0
+    return {
+        "customers": customers,
+        "calls": calls,
+        "calls_today": totals["today"] or 0,
+        "match_rate": round(matched * 100 / calls) if calls else 0,
+        "avg_duration": round(duration or 0),
+        "live": live,
+    }
 
 
 def add_transcript_line(call_id, role, text):
@@ -336,6 +424,7 @@ SEED_CUSTOMERS = [
     },
     {
         "full_name_en": "Fatima Al-Kuwari",
+        "arabic_variant": "faseeh",
         "full_name_ar": "فاطمة الكواري",
         "mobile_e164": "+97455598761",
         "preferred_language": "ar",
@@ -356,6 +445,7 @@ SEED_CUSTOMERS = [
     },
     {
         "full_name_en": "Mohammed Al-Thani",
+        "arabic_variant": "qatari",
         "full_name_ar": "محمد آل ثاني",
         "mobile_e164": "+97433344556",
         "preferred_language": "ar",
@@ -396,6 +486,7 @@ SEED_CUSTOMERS = [
     },
     {
         "full_name_en": "Khalid Al-Emadi",
+        "arabic_variant": "default",
         "full_name_ar": "خالد العمادي",
         "mobile_e164": "+97477712398",
         "preferred_language": "ar",
@@ -436,6 +527,7 @@ SEED_CUSTOMERS = [
     },
     {
         "full_name_en": "Youssef Al-Obaidli",
+        "arabic_variant": "qatari",
         "full_name_ar": "يوسف العبيدلي",
         "mobile_e164": "+97430098120",
         "preferred_language": "ar",

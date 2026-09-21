@@ -1,398 +1,880 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Banking Voice Agent — Demo Console</title>
+<title>Commercial Bank · Voice Agent Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0f1420; --panel: #171e2e; --panel-2: #1e2739; --line: #2a3346;
-    --text: #e7ecf5; --muted: #93a0b8; --accent: #4f8cff; --ok: #35c28e;
-    --warn: #f0b429; --bad: #f2555a; --radius: 10px;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.55 "Segoe UI", system-ui, -apple-system, sans-serif;
-  }
-  header {
-    padding: 18px 24px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-  }
-  h1 { font-size: 18px; margin: 0; font-weight: 600; }
-  .sub { color: var(--muted); font-size: 12px; }
-  .banner {
-    background: rgba(240,180,41,.12); border: 1px solid rgba(240,180,41,.4);
-    color: var(--warn); padding: 8px 14px; border-radius: var(--radius);
-    font-size: 12px; margin: 14px 24px 0;
-  }
-  nav { display: flex; gap: 6px; padding: 16px 24px 0; }
-  nav button {
-    background: transparent; border: 1px solid transparent; color: var(--muted);
-    padding: 9px 16px; border-radius: var(--radius); cursor: pointer; font-size: 14px;
-  }
-  nav button.active { background: var(--panel); color: var(--text); border-color: var(--line); }
-  main { padding: 16px 24px 48px; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
-  }
-  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
-  .col { flex: 1 1 380px; min-width: 320px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
-  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-  tr.clickable:hover { background: var(--panel-2); cursor: pointer; }
-  .ar { direction: rtl; unicode-bidi: isolate; font-size: 15px; }
-  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
-  input, select, textarea {
-    width: 100%; background: var(--panel-2); border: 1px solid var(--line);
-    color: var(--text); padding: 8px 10px; border-radius: 8px; font: inherit;
-  }
-  textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-  button.action {
-    background: var(--accent); border: 0; color: #fff; padding: 9px 16px;
-    border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500;
-  }
-  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
-  button.danger { background: var(--bad); }
-  .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
-  .pill { padding: 2px 9px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); }
-  .pill.ok { color: var(--ok); border-color: rgba(53,194,142,.4); }
-  .pill.live { color: var(--accent); border-color: rgba(79,140,255,.5); }
-  .pill.bad { color: var(--bad); border-color: rgba(242,85,90,.4); }
-  .transcript { max-height: 460px; overflow-y: auto; }
-  .line { padding: 7px 0; border-bottom: 1px solid var(--line); }
-  .line .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  .line.assistant .who { color: var(--accent); }
-  .line.caller .who { color: var(--ok); }
-  .line.system { opacity: .65; font-size: 12px; }
-  .muted { color: var(--muted); }
-  pre { background: var(--panel-2); padding: 12px; border-radius: 8px; overflow-x: auto;
-        white-space: pre-wrap; font-size: 12px; border: 1px solid var(--line); }
-  .hide { display: none; }
-  .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* ---------- CBQ design tokens (from cbq.com.qa: --cbq-primary-color:#A40046) -- */
+:root{
+  --primary:#A40046; --deep:#861F41; --light:#A62E55; --gold:#B79A56;
+  --navy:#1E175B; --slate:#586A76; --ok:#25B24A; --warn:#F0B429; --bad:#D92D3A;
+  --bg:#F4F5F6; --surface:#FFFFFF; --surface-2:#FAFAFB; --line:#E4E7EB;
+  --text:#191C20; --muted:#697787; --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.06);
+  --radius:14px; --sidebar:248px;
+}
+[data-theme="dark"]{
+  --bg:#0E1117; --surface:#161A22; --surface-2:#1C212B; --line:#272D39;
+  --text:#EAEEF5; --muted:#8B97A8; --slate:#8399A7;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 28px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font:400 14px/1.6 'Poppins',system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+:lang(ar),[dir="rtl"]{font-family:'Tajawal','Poppins',sans-serif}
+.ar{font-family:'Tajawal',sans-serif;direction:rtl;unicode-bidi:isolate}
+/* Phone numbers and other Latin/numeric data must stay left-to-right even when
+   the console is in Arabic, otherwise a leading + is rendered at the end. */
+.num{direction:ltr;unicode-bidi:embed;display:inline-block;font-variant-numeric:tabular-nums}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.01em}
+a{color:var(--primary)}
+
+/* ---------- layout ---------------------------------------------------- */
+.app{display:flex;min-height:100vh}
+.sidebar{
+  width:var(--sidebar);flex:0 0 var(--sidebar);background:var(--surface);
+  border-inline-end:1px solid var(--line);display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;
+}
+.brand{padding:22px 20px 18px;border-bottom:1px solid var(--line)}
+.brand-logo{
+  background:#fff;border-radius:10px;padding:10px 12px;display:flex;align-items:center;
+  justify-content:center;min-height:56px;box-shadow:0 1px 3px rgba(0,0,0,.08)
+}
+.brand-logo img{max-width:100%;max-height:38px;display:block}
+.brand-fallback{display:none;font-weight:700;color:var(--primary);font-size:17px;letter-spacing:-.02em}
+.brand-sub{margin-top:10px;font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+nav{padding:14px 12px;flex:1}
+nav button{
+  width:100%;display:flex;align-items:center;gap:11px;background:none;border:0;
+  color:var(--muted);padding:11px 13px;border-radius:10px;cursor:pointer;
+  font:500 14px/1 'Poppins',sans-serif;margin-bottom:3px;transition:background .18s,color .18s;
+  position:relative;
+}
+[dir="rtl"] nav button{font-family:'Tajawal',sans-serif}
+nav button:hover{background:var(--surface-2);color:var(--text)}
+nav button.active{background:linear-gradient(180deg,rgba(0,0,0,0) 12%,rgba(0,0,0,.14) 83%),var(--primary);color:#fff}
+nav button svg{width:18px;height:18px;flex:0 0 18px}
+.side-foot{padding:14px;border-top:1px solid var(--line);display:flex;gap:8px}
+.icon-btn{
+  flex:1;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);
+  border-radius:9px;padding:8px;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;gap:6px;font:500 12px 'Poppins',sans-serif;transition:.18s;
+}
+.icon-btn:hover{color:var(--primary);border-color:var(--primary)}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+header.top{
+  height:66px;display:flex;align-items:center;gap:14px;padding:0 26px;
+  background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;
+}
+header.top h1{font-size:17px}
+.content{padding:24px 26px 56px;flex:1}
+.view{display:none}
+.view.active{display:block}
+
+/* ---------- components ------------------------------------------------- */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-pad{padding:20px}
+.grid{display:grid;gap:16px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.kpi{padding:18px 20px;position:relative;overflow:hidden}
+.kpi .label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.kpi .value{font-size:30px;font-weight:600;margin-top:6px;letter-spacing:-.02em}
+.kpi .value small{font-size:15px;font-weight:500;color:var(--muted)}
+.kpi::after{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:3px;background:var(--primary);opacity:.85}
+.kpi.gold::after{background:var(--gold)} .kpi.ok::after{background:var(--ok)} .kpi.navy::after{background:var(--navy)}
+
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:500;border:1px solid var(--line);color:var(--muted)}
+.pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent);background:color-mix(in srgb,var(--ok) 8%,transparent)}
+.pill.live{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 40%,transparent);background:color-mix(in srgb,var(--primary) 8%,transparent)}
+.pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent);background:color-mix(in srgb,var(--bad) 8%,transparent)}
+.pill.gold{color:#8A6C25;border-color:color-mix(in srgb,var(--gold) 50%,transparent);background:color-mix(in srgb,var(--gold) 14%,transparent)}
+[data-theme="dark"] .pill.gold{color:var(--gold)}
+/* Conventional traffic-light semantics for call state. Each pill also carries
+   its label, so state is never signalled by colour alone. */
+.pill.status-completed{color:#15803D;border-color:#86EFAC;background:#F0FDF4}
+.pill.status-progress {color:#B45309;border-color:#FCD34D;background:#FFFBEB}
+.pill.status-failed   {color:#B91C1C;border-color:#FCA5A5;background:#FEF2F2}
+[data-theme="dark"] .pill.status-completed{color:#4ADE80;border-color:#166534;background:rgba(22,163,74,.14)}
+[data-theme="dark"] .pill.status-progress {color:#FBBF24;border-color:#854D0E;background:rgba(245,158,11,.14)}
+[data-theme="dark"] .pill.status-failed   {color:#F87171;border-color:#991B1B;background:rgba(220,38,38,.14)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.dot.pulse{animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 currentColor;opacity:1}70%{box-shadow:0 0 0 7px transparent;opacity:.75}100%{box-shadow:0 0 0 0 transparent;opacity:1}}
+
+table{width:100%;border-collapse:collapse}
+th{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;
+   text-align:start;padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:middle}
+td.status-cell{white-space:nowrap;text-align:end}
+td.when-cell{white-space:nowrap;font-size:13px}
+/* Grid children default to min-width:auto, which stops them shrinking and
+   pushes the status pill past the card edge on narrow columns. */
+.grid > *{min-width:0}
+.card{overflow:hidden}
+tbody tr{cursor:pointer;transition:background .15s}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:0}
+.avatar{
+  width:34px;height:34px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:600;color:#fff;
+  background:linear-gradient(140deg,var(--primary),var(--deep));flex:0 0 34px;
+}
+.who{display:flex;align-items:center;gap:11px}
+.who .nm{font-weight:500}
+.who .sub{font-size:11.5px;color:var(--muted)}
+
+input,select,textarea{
+  width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);
+  padding:9px 11px;border-radius:9px;font:400 13.5px 'Poppins',sans-serif;transition:border-color .16s,box-shadow .16s;
+}
+input:focus,select:focus,textarea:focus{
+  outline:0;border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 14%,transparent)
+}
+textarea{min-height:96px;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6}
+textarea.ar{font-family:'Tajawal',sans-serif;font-size:13.5px;min-height:200px;line-height:1.9}
+label{display:block;font-size:12px;font-weight:500;color:var(--muted);margin:0 0 5px}
+.field{margin-bottom:14px}
+.hint{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.5}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+.btn{
+  background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(0,0,0,.10)),var(--primary);
+  border:0;color:#fff;padding:10px 18px;border-radius:9px;cursor:pointer;
+  font:500 13.5px 'Poppins',sans-serif;transition:transform .12s,filter .16s;
+}
+.btn:hover{filter:brightness(1.07)} .btn:active{transform:translateY(1px)}
+.btn.ghost{background:var(--surface);border:1px solid var(--line);color:var(--text)}
+.btn.ghost:hover{border-color:var(--primary);color:var(--primary);filter:none}
+.btn.danger{background:var(--bad)}
+.btn.sm{padding:7px 13px;font-size:12.5px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{margin-inline-start:auto}
+
+.section-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.section-head h2{font-size:15px}
+.search{max-width:290px}
+
+/* ---------- drawer ------------------------------------------------------ */
+.scrim{position:fixed;inset:0;background:rgba(10,14,20,.45);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .25s;z-index:60}
+.scrim.open{opacity:1;pointer-events:auto}
+.drawer{
+  position:fixed;inset-block:0;inset-inline-end:0;width:min(560px,94vw);background:var(--surface);
+  border-inline-start:1px solid var(--line);z-index:70;display:flex;flex-direction:column;
+  transform:translateX(100%);transition:transform .32s cubic-bezier(.22,1,.36,1);box-shadow:-18px 0 50px rgba(16,24,40,.16);
+}
+[dir="rtl"] .drawer{transform:translateX(-100%)}
+.drawer.open{transform:translateX(0)!important}
+.drawer header{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+.drawer .body{padding:20px 22px;overflow-y:auto;flex:1}
+.drawer footer{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;background:var(--surface-2)}
+fieldset{border:0;padding:0;margin:0 0 22px}
+legend{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--primary);margin-bottom:11px;padding:0}
+
+/* ---------- transcript -------------------------------------------------- */
+.transcript{max-height:60vh;overflow-y:auto;padding:4px}
+.bubble{max-width:78%;padding:10px 14px;border-radius:14px;margin-bottom:10px;font-size:13.5px;line-height:1.55;position:relative}
+.bubble .meta{font-size:10px;text-transform:uppercase;letter-spacing:.06em;opacity:.7;margin-bottom:3px}
+.bubble.assistant{background:linear-gradient(180deg,rgba(0,0,0,0) 12%,rgba(0,0,0,.12) 83%),var(--primary);color:#fff;margin-inline-start:auto;border-end-end-radius:4px}
+.bubble.caller{background:var(--surface-2);border:1px solid var(--line);border-end-start-radius:4px}
+.bubble.system{background:none;border:1px dashed var(--line);color:var(--muted);font-size:12px;max-width:100%;text-align:center}
+.wave{display:inline-flex;align-items:flex-end;gap:2.5px;height:16px}
+.wave i{width:2.5px;border-radius:2px;background:currentColor;height:4px;animation:wv 1s ease-in-out infinite}
+.wave i:nth-child(2){animation-delay:.12s}.wave i:nth-child(3){animation-delay:.24s}
+.wave i:nth-child(4){animation-delay:.36s}.wave i:nth-child(5){animation-delay:.48s}
+@keyframes wv{0%,100%{height:4px}50%{height:15px}}
+
+.empty{padding:46px 20px;text-align:center;color:var(--muted)}
+.empty svg{width:40px;height:40px;opacity:.35;margin-bottom:10px}
+.skeleton{height:14px;border-radius:6px;background:linear-gradient(90deg,var(--surface-2) 25%,var(--line) 37%,var(--surface-2) 63%);background-size:400% 100%;animation:sk 1.3s ease infinite}
+@keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+
+.banner{
+  display:flex;gap:10px;align-items:flex-start;padding:11px 15px;border-radius:11px;font-size:12.5px;
+  background:color-mix(in srgb,var(--warn) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--warn) 38%,transparent);color:#8A6C25;margin-bottom:18px
+}
+[data-theme="dark"] .banner{color:var(--warn)}
+details.adv{border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden;background:var(--surface-2)}
+details.adv>summary{padding:14px 18px;cursor:pointer;font-weight:500;list-style:none;display:flex;align-items:center;gap:9px}
+details.adv>summary::-webkit-details-marker{display:none}
+details.adv>summary::before{content:"▸";color:var(--primary);transition:transform .2s;display:inline-block}
+details.adv[open]>summary::before{transform:rotate(90deg)}
+details.adv .inner{padding:4px 18px 18px;border-top:1px solid var(--line)}
+pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border-radius:10px;
+    white-space:pre-wrap;word-break:break-word;font-size:11.5px;line-height:1.6;max-height:300px;overflow:auto}
+@media (max-width:900px){
+  .sidebar{position:fixed;transform:translateX(-100%);z-index:80;transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .two{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 
-<header>
-  <div>
-    <h1>Banking Voice Agent — Demo Console</h1>
-    <div class="sub">Azure OpenAI GPT Realtime over SIP</div>
-  </div>
-  <div style="margin-left:auto" class="sub" id="envInfo"></div>
-</header>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-logo">
+        <img src="https://www.cbq.com.qa/-/media/project/cbq/cbqwebsite/logo/cbq-logo-hi.jpg"
+             alt="Commercial Bank"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <span class="brand-fallback">Commercial Bank</span>
+      </div>
+      <div class="brand-sub" data-i18n="voiceAgent">Voice Agent Console</div>
+    </div>
+    <nav>
+      <button data-view="overview" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        <span data-i18n="overview">Overview</span>
+      </button>
+      <button data-view="customers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 11.5a3 3 0 100-6M18 20c0-2.4-1-4.2-2.6-5.2"/></svg>
+        <span data-i18n="customers">Customers</span>
+      </button>
+      <button data-view="calls">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg>
+        <span data-i18n="calls">Calls</span>
+      </button>
+      <button data-view="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.8-.3 1.6 1.6 0 00-1 1.5V21a2 2 0 11-4 0v-.1A1.6 1.6 0 008 19.4a1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.8 1.6 1.6 0 00-1.5-1H2a2 2 0 110-4h.1A1.6 1.6 0 004.6 8a1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.8.3H9a1.6 1.6 0 001-1.5V2a2 2 0 114 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8V9a1.6 1.6 0 001.5 1H22a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z"/></svg>
+        <span data-i18n="settings">Agent settings</span>
+      </button>
+    </nav>
+    <div class="side-foot">
+      <button class="icon-btn" id="themeBtn" title="Toggle theme">◐ <span data-i18n="theme">Theme</span></button>
+      <button class="icon-btn" id="langBtn" title="Toggle interface language">⇄ <span id="langLabel">العربية</span></button>
+    </div>
+  </aside>
 
-<div class="banner">
-  <strong>Demo only.</strong> Every customer record here is fictional. This console has no
-  authentication, so anyone who can reach this URL — including through your dev tunnel — can read
-  and edit it. Never put real customer data in it.
+  <div class="main">
+    <header class="top">
+      <button class="icon-btn" style="flex:0 0 auto;display:none" id="menuBtn">☰</button>
+      <h1 id="viewTitle" data-i18n="overview">Overview</h1>
+      <div class="spacer"></div>
+      <span id="liveIndicator"></span>
+      <span class="pill" id="envPill"></span>
+    </header>
+
+    <div class="content">
+
+      <!-- OVERVIEW -->
+      <section class="view active" id="view-overview">
+        <div class="banner">
+          <span>⚠</span>
+          <span data-i18n="demoWarning">Demonstration environment. All customer records are fictional and this console has no authentication — do not enter real customer data.</span>
+        </div>
+        <div class="grid kpis" id="kpis"></div>
+        <div class="card card-pad" style="margin-top:16px">
+          <div class="section-head"><h2 data-i18n="howItWorks">How a call is contextualised</h2></div>
+          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(215px,1fr))">
+            <div><strong style="color:var(--primary)">1 · <span data-i18n="step1t">Identify</span></strong>
+              <p class="hint" data-i18n="step1">The SIP <code>From</code> header arrives on the webhook before the call is answered, so the caller's number is known up front.</p></div>
+            <div><strong style="color:var(--primary)">2 · <span data-i18n="step2t">Match</span></strong>
+              <p class="hint" data-i18n="step2">The number is matched against the customer records, tolerating national and international formats.</p></div>
+            <div><strong style="color:var(--primary)">3 · <span data-i18n="step3t">Contextualise</span></strong>
+              <p class="hint" data-i18n="step3">Their profile, language and Arabic style are folded into the instructions sent when accepting the call.</p></div>
+            <div><strong style="color:var(--primary)">4 · <span data-i18n="step4t">Converse</span></strong>
+              <p class="hint" data-i18n="step4">The agent greets the customer by name in their own language, already knowing their account context.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CUSTOMERS -->
+      <section class="view" id="view-customers">
+        <div class="section-head">
+          <h2 data-i18n="customers">Customers</h2>
+          <span class="pill" id="custCount"></span>
+          <div class="spacer"></div>
+          <input class="search" id="custSearch" placeholder="Search name or number…" data-i18n-ph="searchPh">
+          <button class="btn sm" onclick="openDrawer()" data-i18n="addCustomer">Add customer</button>
+          <button class="btn sm ghost" onclick="reseed()" data-i18n="reseed">Reseed</button>
+        </div>
+        <div class="card"><table>
+          <thead><tr>
+            <th data-i18n="thCustomer">Customer</th><th data-i18n="thMobile">Mobile</th>
+            <th data-i18n="thLanguage">Language</th><th data-i18n="thSegment">Segment</th>
+            <th data-i18n="thBalance">Balance</th>
+          </tr></thead>
+          <tbody id="custRows"></tbody>
+        </table></div>
+      </section>
+
+      <!-- CALLS -->
+      <section class="view" id="view-calls">
+        <div class="grid" style="grid-template-columns:minmax(330px,1fr) minmax(360px,1.15fr)">
+          <div>
+            <div class="section-head"><h2 data-i18n="callHistory">Call history</h2>
+              <div class="spacer"></div>
+              <button class="btn sm ghost" onclick="loadCalls()" data-i18n="refresh">Refresh</button></div>
+            <div class="card"><table>
+              <thead><tr><th data-i18n="thWhen">When</th><th data-i18n="thFrom">From</th>
+                <th data-i18n="thMatched">Matched</th><th data-i18n="thStatus">Status</th></tr></thead>
+              <tbody id="callRows"></tbody>
+            </table></div>
+          </div>
+          <div>
+            <div class="section-head"><h2 data-i18n="transcript">Transcript</h2>
+              <span id="liveBadge"></span><div class="spacer"></div>
+              <span class="pill" id="transcriptionPill"></span></div>
+            <div class="card card-pad">
+              <div class="transcript" id="transcript"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings">
+        <div class="grid" style="grid-template-columns:minmax(340px,1fr) minmax(340px,1fr)">
+          <div>
+            <div class="section-head"><h2 data-i18n="basicSettings">Basic</h2></div>
+            <div class="card card-pad">
+              <div class="field">
+                <label data-i18n="baseInstructions">Base instructions</label>
+                <textarea id="s_instructions"></textarea>
+                <div class="hint" data-i18n="baseInstructionsHelp">The agent's role. The customer profile, Arabic style and opening directive are appended automatically.</div>
+              </div>
+              <div id="basicSettings"></div>
+              <div class="row" style="margin-top:6px">
+                <button class="btn" onclick="saveSettings()" data-i18n="save">Save</button>
+                <span class="hint" id="setMsg"></span>
+              </div>
+            </div>
+
+            <div class="section-head" style="margin-top:20px"><h2 data-i18n="advanced">Advanced</h2></div>
+            <details class="adv">
+              <summary data-i18n="turnDetection">Turn detection and response limits</summary>
+              <div class="inner" id="advSettings"></div>
+            </details>
+          </div>
+
+          <div>
+            <div class="section-head"><h2 data-i18n="arabicStyles">Arabic styles</h2></div>
+            <div class="card card-pad">
+              <p class="hint" style="margin-top:0" data-i18n="arabicStylesHelp">
+                Applied only to customers whose preferred language is Arabic, according to the style chosen on their profile.
+              </p>
+              <div class="field">
+                <label>Faseeh — <span data-i18n="faseehDesc">Modern Standard Arabic</span></label>
+                <textarea id="p_faseeh" class="ar" dir="rtl"></textarea>
+              </div>
+              <div class="field">
+                <label>Qatari — <span data-i18n="qatariDesc">Doha dialect</span></label>
+                <textarea id="p_qatari" class="ar" dir="rtl"></textarea>
+              </div>
+              <button class="btn" onclick="saveSettings()" data-i18n="savePrompts">Save styles</button>
+            </div>
+
+            <div class="section-head" style="margin-top:20px"><h2 data-i18n="preview">Preview</h2></div>
+            <div class="card card-pad">
+              <p class="hint" style="margin-top:0" data-i18n="previewHelp">See exactly what the agent is told if this number calls now.</p>
+              <div class="row">
+                <input id="p_number" value="+97433344556" style="flex:1">
+                <button class="btn ghost" onclick="preview()" data-i18n="run">Run</button>
+              </div>
+              <div id="previewOut"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
 </div>
 
-<nav>
-  <button data-tab="customers" class="active">Customers</button>
-  <button data-tab="calls">Calls</button>
-  <button data-tab="settings">Agent settings</button>
-</nav>
-
-<main>
-
-  <!-- Customers ------------------------------------------------------------>
-  <section id="tab-customers">
-    <div class="row">
-      <div class="col" style="flex:2 1 560px">
-        <div class="panel">
-          <div class="toolbar">
-            <strong>Customers</strong>
-            <span class="muted" id="custCount"></span>
-            <span style="margin-left:auto"></span>
-            <button class="action ghost" onclick="newCustomer()">Add customer</button>
-            <button class="action ghost" onclick="reseed()">Reseed demo data</button>
-          </div>
-          <table style="margin-top:12px">
-            <thead><tr><th>Name</th><th>Arabic</th><th>Mobile</th><th>Lang</th><th>Segment</th><th>Balance</th></tr></thead>
-            <tbody id="custRows"></tbody>
-          </table>
-        </div>
+<div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+<aside class="drawer" id="drawer">
+  <header>
+    <div class="avatar" id="dAvatar">+</div>
+    <div><div id="dTitle" style="font-weight:600">Add customer</div>
+         <div class="hint" id="dSub" style="margin:0"></div></div>
+    <div class="spacer"></div>
+    <button class="btn sm ghost" onclick="closeDrawer()">✕</button>
+  </header>
+  <div class="body">
+    <fieldset>
+      <legend data-i18n="fsIdentity">Identity</legend>
+      <div class="two">
+        <div class="field"><label data-i18n="nameEn">Full name (English) *</label><input id="f_full_name_en"></div>
+        <div class="field"><label data-i18n="nameAr">Full name (Arabic)</label><input id="f_full_name_ar" class="ar" dir="rtl"></div>
       </div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="fsContact">Contact and language</legend>
+      <div class="two">
+        <div class="field"><label data-i18n="mobile">Mobile (E.164) *</label><input id="f_mobile_e164" placeholder="+97455512345"></div>
+        <div class="field"><label data-i18n="prefLang">Preferred language</label>
+          <select id="f_preferred_language" onchange="toggleVariant()">
+            <option value="en">English</option><option value="ar">العربية — Arabic</option>
+          </select></div>
+      </div>
+      <div class="field" id="variantField" style="display:none">
+        <label data-i18n="arabicStyle">Arabic style</label>
+        <select id="f_arabic_variant"></select>
+        <div class="hint" data-i18n="arabicStyleHelp">Faseeh enforces Modern Standard Arabic; Qatari enforces the Doha dialect. Default leaves the model's own Arabic untouched.</div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="fsAccount">Account</legend>
+      <div class="two">
+        <div class="field"><label data-i18n="accountType">Account type</label><input id="f_account_type"></div>
+        <div class="field"><label data-i18n="segment">Segment</label><input id="f_segment"></div>
+        <div class="field"><label data-i18n="balance">Balance</label><input id="f_balance" type="number" step="0.01"></div>
+        <div class="field"><label data-i18n="currency">Currency</label><input id="f_currency" value="QAR"></div>
+        <div class="field"><label data-i18n="branch">Home branch</label><input id="f_branch"></div>
+        <div class="field"><label data-i18n="cardStatus">Card status</label><input id="f_card_status"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="fsActivity">Activity and service</legend>
+      <div class="two">
+        <div class="field"><label data-i18n="lastAmt">Last transaction amount</label><input id="f_last_txn_amount" type="number" step="0.01"></div>
+        <div class="field"><label data-i18n="lastMerch">Merchant</label><input id="f_last_txn_merchant"></div>
+        <div class="field"><label data-i18n="lastDate">Date</label><input id="f_last_txn_date" placeholder="2026-09-14"></div>
+        <div class="field"><label data-i18n="rm">Relationship manager</label><input id="f_relationship_manager"></div>
+        <div class="field"><label data-i18n="kyc">KYC status</label><input id="f_kyc_status"></div>
+        <div class="field"><label data-i18n="kycExp">KYC expiry</label><input id="f_kyc_expiry" placeholder="2027-03-01"></div>
+      </div>
+      <div class="field"><label data-i18n="openCase">Open case</label><input id="f_open_case"></div>
+      <div class="field"><label data-i18n="loan">Loan summary</label><input id="f_loan_summary"></div>
+    </fieldset>
+  </div>
+  <footer>
+    <button class="btn" onclick="saveCustomer()" data-i18n="save">Save</button>
+    <button class="btn ghost" onclick="closeDrawer()" data-i18n="cancel">Cancel</button>
+    <div class="spacer"></div>
+    <button class="btn danger" id="deleteBtn" style="display:none" onclick="deleteCustomer()" data-i18n="delete">Delete</button>
+  </footer>
+</aside>
 
-      <div class="col">
-        <div class="panel" id="custForm">
-          <strong id="formTitle">Add customer</strong>
-          <div class="row">
-            <div class="col" style="min-width:150px">
-              <label>Full name (English) *</label><input id="f_full_name_en">
-              <label>Mobile (E.164) *</label><input id="f_mobile_e164" placeholder="+97455512345">
-              <label>Preferred language</label>
-              <select id="f_preferred_language"><option value="en">English</option><option value="ar">Arabic</option></select>
-              <label>Account type</label><input id="f_account_type">
-              <label>Balance</label><input id="f_balance" type="number" step="0.01">
-              <label>Currency</label><input id="f_currency" value="QAR">
-              <label>Segment</label><input id="f_segment">
-              <label>Home branch</label><input id="f_branch">
-              <label>Card status</label><input id="f_card_status">
-            </div>
-            <div class="col" style="min-width:150px">
-              <label>Full name (Arabic)</label><input id="f_full_name_ar" class="ar">
-              <label>Last transaction amount</label><input id="f_last_txn_amount" type="number" step="0.01">
-              <label>Last transaction merchant</label><input id="f_last_txn_merchant">
-              <label>Last transaction date</label><input id="f_last_txn_date" placeholder="2026-09-14">
-              <label>Open case</label><input id="f_open_case">
-              <label>Relationship manager</label><input id="f_relationship_manager">
-              <label>KYC status</label><input id="f_kyc_status">
-              <label>KYC expiry</label><input id="f_kyc_expiry" placeholder="2027-03-01">
-              <label>Loan summary</label><input id="f_loan_summary">
-            </div>
-          </div>
-          <div class="actions">
-            <button class="action" onclick="saveCustomer()">Save</button>
-            <button class="action ghost" onclick="newCustomer()">Clear</button>
-            <button class="action danger hide" id="deleteBtn" onclick="deleteCustomer()">Delete</button>
-          </div>
-          <div class="muted" id="custMsg" style="margin-top:10px"></div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Calls ---------------------------------------------------------------->
-  <section id="tab-calls" class="hide">
-    <div class="row">
-      <div class="col">
-        <div class="panel">
-          <div class="toolbar">
-            <strong>Call history</strong>
-            <button class="action ghost" style="margin-left:auto" onclick="loadCalls()">Refresh</button>
-          </div>
-          <table style="margin-top:12px">
-            <thead><tr><th>When</th><th>From</th><th>Matched</th><th>Lang</th><th>Status</th></tr></thead>
-            <tbody id="callRows"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="col">
-        <div class="panel">
-          <div class="toolbar">
-            <strong>Transcript</strong>
-            <span id="liveBadge"></span>
-            <span class="muted" id="callMeta" style="margin-left:auto"></span>
-          </div>
-          <div class="transcript" id="transcript">
-            <p class="muted">Select a call to see its transcript. A call in progress updates live.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Settings ------------------------------------------------------------->
-  <section id="tab-settings" class="hide">
-    <div class="row">
-      <div class="col">
-        <div class="panel">
-          <strong>Agent settings</strong>
-          <p class="muted" style="font-size:12px">
-            Saved to the database and read at the start of each call, so changes apply to the
-            next call without restarting. Leave a field empty to fall back to <code>.env</code>.
-          </p>
-          <label>Base instructions</label>
-          <textarea id="s_instructions"></textarea>
-          <label>Fallback greeting (used for unrecognised callers)</label>
-          <input id="s_greeting">
-          <label>Voice</label>
-          <input id="s_voice" placeholder="leave empty for the service default">
-          <div class="actions">
-            <button class="action" onclick="saveSettings()">Save</button>
-          </div>
-          <div class="muted" id="setMsg" style="margin-top:10px"></div>
-        </div>
-      </div>
-      <div class="col">
-        <div class="panel">
-          <strong>Preview contextualisation</strong>
-          <p class="muted" style="font-size:12px">
-            Enter a number to see exactly what the agent would be told if that number called now.
-          </p>
-          <label>Caller number</label>
-          <input id="p_number" placeholder="+97455512345" value="+97455512345">
-          <div class="actions"><button class="action ghost" onclick="preview()">Preview</button></div>
-          <div id="previewOut"></div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-</main>
+<script type="module">
+// Motion from CDN. If it cannot load (offline conference wifi), the console
+// still works — it simply loses the animation.
+let animate = () => ({ finished: Promise.resolve() });
+let stagger = () => 0;
+try {
+  const m = await import("https://cdn.jsdelivr.net/npm/motion@11.11.17/+esm");
+  animate = m.animate; stagger = m.stagger;
+  document.documentElement.dataset.motion = "on";
+} catch (err) {
+  console.warn("Motion unavailable; continuing without animation.", err);
+  document.documentElement.dataset.motion = "off";
+}
+window.__motion = { animate, stagger };
+</script>
 
 <script>
-const FIELDS = ["full_name_en","full_name_ar","mobile_e164","preferred_language","account_type",
-  "balance","currency","segment","last_txn_amount","last_txn_merchant","last_txn_date",
+const FIELDS = ["full_name_en","full_name_ar","mobile_e164","preferred_language","arabic_variant",
+  "account_type","balance","currency","segment","last_txn_amount","last_txn_merchant","last_txn_date",
   "open_case","card_status","relationship_manager","branch","kyc_status","kyc_expiry","loan_summary"];
+const NUMERIC = ["balance","last_txn_amount"];
 
-let editingId = null, selectedCall = null, lastLineId = 0, pollTimer = null;
+// Human labels for the realtime settings; anything not listed falls back to a
+// title-cased version of its key.
+const LABELS = {
+  bank_name_en:"Bank name · English", bank_name_ar:"Bank name · Arabic",
+  voice_en:"Voice · English caller", voice_ar:"Voice · Arabic caller",
+  speed:"Playback speed", transcription_model:"Transcription model",
+  transcription_language:"Transcription language hint",
+  turn_detection_type:"Turn detection", vad_threshold:"Speech threshold",
+  vad_prefix_padding_ms:"Prefix padding (ms)", vad_silence_duration_ms:"End-of-turn silence (ms)",
+  vad_eagerness:"Semantic eagerness", create_response:"Reply automatically",
+  interrupt_response:"Allow caller to interrupt", max_output_tokens:"Max reply tokens",
+};
+
+const I18N = {
+  ar:{voiceAgent:"منصة الوكيل الصوتي",overview:"نظرة عامة",customers:"العملاء",calls:"المكالمات",
+    settings:"إعدادات الوكيل",theme:"المظهر",howItWorks:"كيف تُخصَّص المكالمة",
+    step1t:"التعرّف",step2t:"المطابقة",step3t:"التخصيص",step4t:"المحادثة",
+    addCustomer:"إضافة عميل",reseed:"إعادة التعبئة",thCustomer:"العميل",thMobile:"الجوال",
+    thLanguage:"اللغة",thSegment:"الشريحة",thBalance:"الرصيد",callHistory:"سجل المكالمات",
+    refresh:"تحديث",thWhen:"الوقت",thFrom:"من",thMatched:"مطابق",thStatus:"الحالة",
+    transcript:"النص",basicSettings:"الإعدادات الأساسية",advanced:"إعدادات متقدمة",
+    baseInstructions:"التعليمات الأساسية",save:"حفظ",cancel:"إلغاء",
+    delete:"حذف",arabicStyles:"الأساليب العربية",preview:"معاينة",run:"تشغيل",
+    savePrompts:"حفظ الأساليب",turnDetection:"كشف الأدوار وحدود الرد",
+    fsIdentity:"الهوية",fsContact:"التواصل واللغة",fsAccount:"الحساب",fsActivity:"النشاط والخدمة",
+    nameEn:"الاسم (إنجليزي) *",nameAr:"الاسم (عربي)",mobile:"الجوال *",prefLang:"اللغة المفضلة",
+    arabicStyle:"الأسلوب العربي",accountType:"نوع الحساب",segment:"الشريحة",balance:"الرصيد",
+    currency:"العملة",branch:"الفرع",cardStatus:"حالة البطاقة",lastAmt:"مبلغ آخر عملية",
+    lastMerch:"التاجر",lastDate:"التاريخ",rm:"مدير العلاقة",kyc:"حالة اعرف عميلك",kycExp:"انتهاء اعرف عميلك",
+    openCase:"بلاغ مفتوح",loan:"ملخص القرض",searchPh:"ابحث بالاسم أو الرقم…"},
+  en:{}
+};
+
+let state = { customers:[], calls:[], settings:null, variants:{}, editing:null,
+              call:null, lastLine:0, timer:null, lang:"en" };
 
 const $ = id => document.getElementById(id);
 const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const initials = n => (n||"?").split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase();
+const money = (v,c) => v==null ? "" : `${c||""} ${Number(v).toLocaleString(undefined,{minimumFractionDigits:2})}`.trim();
+const mo = () => window.__motion || { animate:()=>({finished:Promise.resolve()}), stagger:()=>0 };
 
-document.querySelectorAll("nav button").forEach(btn => btn.onclick = () => {
+/* Animation must never be able to hide content. Motion animates inline
+   opacity/transform; if an animation is interrupted or never completes, the
+   element would be left invisible. reveal() always clears the inline styles
+   afterwards, so the worst case is "no animation", never "no content". */
+function reveal(target, keyframes, options){
+  const nodes = typeof target === "string" ? [...document.querySelectorAll(target)] : [target];
+  if (!nodes.length) return;
+  const settle = () => nodes.forEach(n => { n.style.opacity = ""; n.style.transform = ""; });
+  try {
+    const controls = mo().animate(target, keyframes, options);
+    Promise.resolve(controls && controls.finished).then(settle).catch(settle);
+  } catch { settle(); }
+  setTimeout(settle, (options?.duration ?? .35) * 1000 + 700);
+}
+
+/* ---------- navigation ---------- */
+function showView(view, push){
+  const btn = document.querySelector(`nav button[data-view="${view}"]`);
+  if (!btn) return;
   document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
-  ["customers","calls","settings"].forEach(t =>
-    $("tab-" + t).classList.toggle("hide", t !== btn.dataset.tab));
-  if (btn.dataset.tab === "calls") loadCalls();
-  if (btn.dataset.tab === "settings") loadSettings();
-});
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+  const el = $("view-" + view);
+  el.classList.add("active");
+  $("viewTitle").textContent = btn.querySelector("span").textContent;
+  reveal(el, { opacity:[0,1], transform:["translateY(8px)","translateY(0)"] }, { duration:.32 });
+  if (view === "calls") loadCalls();
+  if (view === "settings") loadSettings();
+  if (view === "overview") loadStats();
+  $("sidebar").classList.remove("open");
+  if (push !== false) {
+    const url = new URL(location.href);
+    url.searchParams.set("view", view);
+    url.hash = "";
+    history.replaceState(null, "", url);
+  }
+}
+document.querySelectorAll("nav button").forEach(btn => btn.onclick = () => showView(btn.dataset.view));
+window.addEventListener("hashchange", () => showView((location.hash || "#overview").slice(1), false));
+$("menuBtn").onclick = () => $("sidebar").classList.toggle("open");
 
-// --- Customers -------------------------------------------------------------
-async function loadCustomers() {
-  const rows = await (await fetch("/api/customers")).json();
-  $("custCount").textContent = rows.length + " records";
-  $("custRows").innerHTML = rows.map(c => `
-    <tr class="clickable" onclick="editCustomer(${c.id})">
-      <td>${esc(c.full_name_en)}</td>
-      <td class="ar">${esc(c.full_name_ar)}</td>
-      <td>${esc(c.mobile_e164)}</td>
-      <td>${c.preferred_language === "ar" ? "العربية" : "English"}</td>
-      <td>${esc(c.segment)}</td>
-      <td>${c.balance == null ? "" : esc(c.currency || "") + " " + Number(c.balance).toLocaleString()}</td>
-    </tr>`).join("");
-  window._customers = rows;
+/* ---------- theme + language ---------- */
+$("themeBtn").onclick = () => {
+  const root = document.documentElement;
+  const next = root.dataset.theme === "dark" ? "light" : "dark";
+  root.dataset.theme = next;
+  localStorage.setItem("cbq-theme", next);
+};
+document.documentElement.dataset.theme = localStorage.getItem("cbq-theme") || "light";
+
+$("langBtn").onclick = () => setLang(state.lang === "en" ? "ar" : "en");
+function setLang(lang){
+  state.lang = lang;
+  const root = document.documentElement;
+  root.lang = lang; root.dir = lang === "ar" ? "rtl" : "ltr";
+  $("langLabel").textContent = lang === "ar" ? "English" : "العربية";
+  const dict = I18N[lang] || {};
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const k = el.dataset.i18n;
+    if (!el.dataset.en) el.dataset.en = el.textContent;
+    el.textContent = dict[k] || el.dataset.en;
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => {
+    const k = el.dataset.i18nPh;
+    if (!el.dataset.enPh) el.dataset.enPh = el.placeholder;
+    el.placeholder = dict[k] || el.dataset.enPh;
+  });
+  const active = document.querySelector("nav button.active span");
+  if (active) $("viewTitle").textContent = active.textContent;
+  localStorage.setItem("cbq-lang", lang);
 }
 
-function newCustomer() {
-  editingId = null;
-  FIELDS.forEach(f => { const el = $("f_" + f); if (el) el.value = ""; });
-  $("f_currency").value = "QAR";
-  $("f_preferred_language").value = "en";
-  $("formTitle").textContent = "Add customer";
-  $("deleteBtn").classList.add("hide");
-  $("custMsg").textContent = "";
+/* ---------- overview ---------- */
+async function loadStats(){
+  const s = await (await fetch("/api/stats")).json();
+  const cards = [
+    { label:"Customers", labelAr:"العملاء", value:s.customers, cls:"" },
+    { label:"Calls today", labelAr:"مكالمات اليوم", value:s.calls_today, cls:"navy" },
+    { label:"Recognised", labelAr:"تم التعرف", value:s.match_rate, suffix:"%", cls:"ok" },
+    { label:"Avg duration", labelAr:"متوسط المدة", value:s.avg_duration, suffix:"s", cls:"gold" },
+  ];
+  $("kpis").innerHTML = cards.map(c => `
+    <div class="card kpi ${c.cls}">
+      <div class="label">${esc(state.lang==="ar"?c.labelAr:c.label)}</div>
+      <div class="value" data-target="${c.value}">0<small>${c.suffix||""}</small></div>
+    </div>`).join("");
+
+  document.querySelectorAll("#kpis .value").forEach(el => {
+    const target = Number(el.dataset.target) || 0;
+    const small = el.querySelector("small")?.outerHTML || "";
+    const started = performance.now();
+    const step = now => {
+      const p = Math.min(1, (now - started) / 900);
+      el.innerHTML = Math.round(target * (1 - Math.pow(1 - p, 3))) + small;
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  reveal("#kpis .kpi", { opacity:[0,1], transform:["translateY(12px)","translateY(0)"] }, { duration:.4, delay: mo().stagger(.07) });
+
+  $("liveIndicator").innerHTML = s.live
+    ? `<span class="pill live"><span class="dot pulse"></span> ${s.live} live</span>` : "";
 }
 
-function editCustomer(id) {
-  const c = (window._customers || []).find(x => x.id === id);
-  if (!c) return;
-  editingId = id;
-  FIELDS.forEach(f => { const el = $("f_" + f); if (el) el.value = c[f] ?? ""; });
-  $("formTitle").textContent = "Edit " + c.full_name_en;
-  $("deleteBtn").classList.remove("hide");
-  $("custMsg").textContent = "";
-  $("custForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+/* ---------- customers ---------- */
+async function loadCustomers(){
+  state.customers = await (await fetch("/api/customers")).json();
+  renderCustomers();
+}
+function renderCustomers(){
+  const q = ($("custSearch").value || "").toLowerCase().trim();
+  const rows = state.customers.filter(c => !q ||
+    (c.full_name_en||"").toLowerCase().includes(q) ||
+    (c.full_name_ar||"").includes(q) ||
+    (c.mobile_e164||"").includes(q));
+  $("custCount").textContent = `${rows.length} / ${state.customers.length}`;
+  $("custRows").innerHTML = rows.length ? rows.map(c => `
+    <tr onclick="openDrawer(${c.id})">
+      <td><div class="who"><div class="avatar">${esc(initials(c.full_name_en))}</div>
+        <div><div class="nm">${esc(c.full_name_en)}</div>
+             <div class="sub ar">${esc(c.full_name_ar)}</div></div></div></td>
+      <td><span class="num">${esc(c.mobile_e164)}</span></td>
+      <td>${c.preferred_language==="ar"
+            ? `<span class="pill gold">العربية${c.arabic_variant&&c.arabic_variant!=="default"?" · "+esc(c.arabic_variant):""}</span>`
+            : `<span class="pill">English</span>`}</td>
+      <td>${esc(c.segment||"")}</td>
+      <td><span class="num">${esc(money(c.balance,c.currency))}</span></td>
+    </tr>`).join("")
+    : `<tr><td colspan="5" class="empty">No customers match “${esc(q)}”.</td></tr>`;
+  reveal("#custRows tr", { opacity:[0,1] }, { duration:.25, delay: mo().stagger(.03) });
+}
+$("custSearch").oninput = renderCustomers;
+
+function toggleVariant(){
+  $("variantField").style.display = $("f_preferred_language").value === "ar" ? "" : "none";
 }
 
-async function saveCustomer() {
+window.openDrawer = function(id){
+  state.editing = id ?? null;
+  const c = id ? state.customers.find(x => x.id === id) : null;
+  FIELDS.forEach(f => { const el = $("f_"+f); if (el) el.value = c ? (c[f] ?? "") : ""; });
+  $("f_arabic_variant").innerHTML = Object.entries(state.variants)
+    .map(([k,v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
+  $("f_arabic_variant").value = (c && c.arabic_variant) || "default";
+  if (!c) { $("f_currency").value = "QAR"; $("f_preferred_language").value = "en"; }
+  $("dTitle").textContent = c ? c.full_name_en : "Add customer";
+  $("dSub").textContent = c ? c.mobile_e164 : "New record";
+  $("dAvatar").textContent = c ? initials(c.full_name_en) : "+";
+  $("deleteBtn").style.display = c ? "" : "none";
+  toggleVariant();
+  $("scrim").classList.add("open"); $("drawer").classList.add("open");
+};
+window.closeDrawer = () => { $("scrim").classList.remove("open"); $("drawer").classList.remove("open"); };
+
+window.saveCustomer = async function(){
   const body = {};
   FIELDS.forEach(f => {
-    const el = $("f_" + f);
-    if (!el) return;
-    let v = el.value.trim();
-    if (["balance","last_txn_amount"].includes(f)) { body[f] = v === "" ? null : Number(v); return; }
-    body[f] = v === "" ? null : v;
+    const el = $("f_"+f); if (!el) return;
+    const v = el.value.trim();
+    body[f] = NUMERIC.includes(f) ? (v === "" ? null : Number(v)) : (v === "" ? null : v);
   });
-  if (!body.full_name_en || !body.mobile_e164) {
-    $("custMsg").textContent = "Name and mobile number are required.";
-    return;
-  }
-  const res = await fetch(editingId ? "/api/customers/" + editingId : "/api/customers", {
-    method: editingId ? "PUT" : "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
+  if (!body.full_name_en || !body.mobile_e164) { alert("Name and mobile number are required."); return; }
+  const res = await fetch(state.editing ? "/api/customers/"+state.editing : "/api/customers", {
+    method: state.editing ? "PUT" : "POST",
+    headers: {"Content-Type":"application/json"}, body: JSON.stringify(body)
   });
-  const out = await res.json();
-  $("custMsg").textContent = res.ok ? "Saved." : ("Error: " + (out.error || res.status));
-  if (res.ok) { const wasNew = !editingId; await loadCustomers(); if (wasNew) newCustomer(); }
+  if (!res.ok) { const e = await res.json(); alert("Error: " + (e.error||res.status)); return; }
+  closeDrawer(); await loadCustomers(); loadStats();
+};
+window.deleteCustomer = async function(){
+  if (!state.editing || !confirm("Delete this customer?")) return;
+  await fetch("/api/customers/"+state.editing, {method:"DELETE"});
+  closeDrawer(); await loadCustomers(); loadStats();
+};
+window.reseed = async function(){
+  if (!confirm("Replace all customers with the demo data?")) return;
+  await fetch("/api/seed", {method:"POST"});
+  await loadCustomers(); loadStats();
+};
+
+/* ---------- calls ---------- */
+const STATUS_CLASS = { completed:"status-completed", in_progress:"status-progress", failed:"status-failed" };
+const STATUS_LABEL = { completed:"completed", in_progress:"in progress", failed:"failed" };
+
+/* "09:32" for today, "21 Sep 09:32" otherwise — the full ISO stamp wrapped
+   over three lines and squeezed the status column. */
+function shortWhen(iso){
+  if (!iso) return "";
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  if (isNaN(d)) return iso.slice(0,16).replace("T"," ");
+  const time = d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  return sameDay ? time : `${d.toLocaleDateString(undefined,{day:"2-digit",month:"short"})} ${time}`;
 }
 
-async function deleteCustomer() {
-  if (!editingId || !confirm("Delete this customer?")) return;
-  await fetch("/api/customers/" + editingId, { method: "DELETE" });
-  newCustomer(); loadCustomers();
+function callsSignature(rows){
+  return rows.map(c => `${c.call_id}:${c.status}:${c.total_lines}:${c.caller_lines}`).join("|");
 }
 
-async function reseed() {
-  if (!confirm("Replace all customers with the demo seed data?")) return;
-  const out = await (await fetch("/api/seed", { method: "POST" })).json();
-  $("custMsg").textContent = "Reseeded " + out.inserted + " customers.";
-  newCustomer(); loadCustomers();
-}
+window.loadCalls = async function(force){
+  let rows;
+  try { rows = await (await fetch("/api/calls")).json(); } catch { return; }
 
-// --- Calls -----------------------------------------------------------------
-async function loadCalls() {
-  const rows = await (await fetch("/api/calls")).json();
+  // Re-render only on change, so polling cannot steal focus, reset scroll or
+  // make the table flicker while someone is reading it.
+  const sig = callsSignature(rows);
+  if (!force && sig === state.callsSig) { state.calls = rows; return; }
+  state.callsSig = sig;
+  state.calls = rows;
+
   $("callRows").innerHTML = rows.length ? rows.map(c => `
-    <tr class="clickable" onclick="selectCall('${esc(c.call_id)}','${esc(c.status)}')">
-      <td>${esc((c.started_at || "").replace("T", " ").slice(0, 19))}</td>
-      <td>${esc(c.from_number || "unknown")}</td>
+    <tr onclick="selectCall('${esc(c.call_id)}','${esc(c.status)}')"
+        ${state.call === c.call_id ? 'style="background:var(--surface-2)"' : ""}>
+      <td class="when-cell">${esc(shortWhen(c.started_at))}</td>
+      <td><span class="num">${esc(c.from_number||"unknown")}</span></td>
       <td>${c.matched ? esc(c.full_name_en) : '<span class="muted">no match</span>'}</td>
-      <td>${esc(c.language || "")}</td>
-      <td><span class="pill ${c.status === "in_progress" ? "live" : c.status === "failed" ? "bad" : "ok"}">${esc(c.status)}</span></td>
-    </tr>`).join("") : '<tr><td colspan="5" class="muted">No calls yet. Ring your SIP number.</td></tr>';
+      <td class="status-cell"><span class="pill ${STATUS_CLASS[c.status]||""}">
+        ${c.status==="in_progress"?'<span class="dot pulse"></span> ':""}${esc(STATUS_LABEL[c.status]||c.status)}</span></td>
+    </tr>`).join("")
+    : `<tr><td colspan="4" class="empty">No calls yet. Ring your SIP number to see one appear here.</td></tr>`;
+
+  if (state.call) {
+    const current = rows.find(c => c.call_id === state.call);
+    if (current) updateTranscriptionPill(current);
+  } else {
+    $("transcript").innerHTML = `<div class="empty">Select a call to read its transcript.</div>`;
+  }
+  loadStats();
+};
+
+function updateTranscriptionPill(call){
+  const on = call && call.caller_lines > 0;
+  $("transcriptionPill").textContent = on
+    ? "caller transcription active" : "caller transcription not received";
+  $("transcriptionPill").className = "pill " + (on ? "status-completed" : "");
 }
 
-function selectCall(callId, status) {
-  selectedCall = callId; lastLineId = 0;
+window.selectCall = function(callId, status){
+  state.call = callId; state.lastLine = 0;
   $("transcript").innerHTML = "";
-  $("callMeta").textContent = callId;
-  clearInterval(pollTimer);
+  clearInterval(state.timer);
+  const call = state.calls.find(c => c.call_id === callId);
+  updateTranscriptionPill(call);
   fetchTranscript();
   if (status === "in_progress") {
-    $("liveBadge").innerHTML = '<span class="pill live">live</span>';
-    pollTimer = setInterval(fetchTranscript, 1000);
-  } else {
-    $("liveBadge").innerHTML = "";
-  }
-}
+    $("liveBadge").innerHTML = `<span class="pill status-progress"><span class="wave"><i></i><i></i><i></i><i></i><i></i></span> live</span>`;
+    state.timer = setInterval(fetchTranscript, 1000);
+  } else $("liveBadge").innerHTML = "";
+  loadCalls(true);
+};
 
-async function fetchTranscript() {
-  if (!selectedCall) return;
-  const lines = await (await fetch(`/api/calls/${encodeURIComponent(selectedCall)}/transcript?after=${lastLineId}`)).json();
-  if (!lines.length) return;
+async function fetchTranscript(){
+  if (!state.call) return;
+  const lines = await (await fetch(`/api/calls/${encodeURIComponent(state.call)}/transcript?after=${state.lastLine}`)).json();
+  if (!lines.length) {
+    if (!$("transcript").children.length)
+      $("transcript").innerHTML = `<div class="empty">No transcript lines recorded for this call.</div>`;
+    return;
+  }
   const box = $("transcript");
+  if (box.querySelector(".empty")) box.innerHTML = "";
   lines.forEach(l => {
-    lastLineId = Math.max(lastLineId, l.id);
-    const div = document.createElement("div");
-    div.className = "line " + l.role;
-    div.innerHTML = `<div class="who">${esc(l.role)}</div><div>${esc(l.text)}</div>`;
-    box.appendChild(div);
+    state.lastLine = Math.max(state.lastLine, l.id);
+    const d = document.createElement("div");
+    d.className = "bubble " + l.role;
+    const isArabic = /[\u0600-\u06FF]/.test(l.text);
+    d.innerHTML = `<div class="meta">${esc(l.role)}</div><div${isArabic?' class="ar"':""}>${esc(l.text)}</div>`;
+    box.appendChild(d);
+    reveal(d, { opacity:[0,1], transform:["translateY(10px) scale(.98)","translateY(0) scale(1)"] }, { duration:.3 });
   });
   box.scrollTop = box.scrollHeight;
 }
 
-// --- Settings --------------------------------------------------------------
-async function loadSettings() {
+/* ---------- settings ---------- */
+function controlFor(s){
+  const id = "cfg_" + s.name;
+  const label = (LABELS[s.name] || s.name.replace(/_/g," ").replace(/\b\w/g, m => m.toUpperCase()));
+  let input;
+  if (s.choices) {
+    input = `<select id="${id}">${s.choices.map(c =>
+      `<option value="${esc(c)}"${String(s.value)===c?" selected":""}>${esc(c)}</option>`).join("")}</select>`;
+  } else if (s.type === "bool") {
+    input = `<select id="${id}"><option value="true"${s.value?" selected":""}>Enabled</option>
+             <option value="false"${!s.value?" selected":""}>Disabled</option></select>`;
+  } else if (s.type === "int" || s.type === "float") {
+    const step = s.type === "float" ? "0.05" : "1";
+    const rng = (s.min!==null?` min="${s.min}"`:"") + (s.max!==null?` max="${s.max}"`:"");
+    input = `<input id="${id}" type="number" step="${step}"${rng} value="${esc(s.value)}">`;
+  } else {
+    input = `<input id="${id}" value="${esc(s.value)}">`;
+  }
+  return `<div class="field"><label>${esc(label)}</label>${input}
+    <div class="hint">${esc(s.help)} <em>Default: ${esc(String(s.default))}</em></div></div>`;
+}
+
+window.loadSettings = async function(){
   const s = await (await fetch("/api/settings")).json();
+  state.settings = s; state.variants = s.arabic_variants;
   $("s_instructions").value = s.instructions || "";
-  $("s_greeting").value = s.greeting || "";
-  $("s_voice").value = s.voice || "";
-  $("envInfo").textContent = `${s.deployment} · transcription: ${s.transcription || "assistant only"}`;
-}
+    $("p_faseeh").value = (s.prompts||{}).faseeh || "";
+  $("p_qatari").value = (s.prompts||{}).qatari || "";
+  $("basicSettings").innerHTML = s.settings.filter(x => x.group==="basic").map(controlFor).join("");
+  $("advSettings").innerHTML = s.settings.filter(x => x.group==="advanced").map(controlFor).join("");
+  $("envPill").textContent = s.deployment;
+};
 
-async function saveSettings() {
-  const res = await fetch("/api/settings", {
-    method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      instructions: $("s_instructions").value,
-      greeting: $("s_greeting").value,
-      voice: $("s_voice").value
-    })
+window.saveSettings = async function(){
+  const body = { instructions:$("s_instructions").value,
+                 prompts:{ faseeh:$("p_faseeh").value, qatari:$("p_qatari").value } };
+  (state.settings?.settings || []).forEach(s => {
+    const el = $("cfg_" + s.name); if (el) body[s.name] = el.value;
   });
-  $("setMsg").textContent = res.ok ? "Saved. Applies to the next call." : "Save failed.";
-}
+  const res = await fetch("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"},
+                                            body:JSON.stringify(body)});
+  $("setMsg").textContent = res.ok ? "Saved — applies to the next call." : "Save failed.";
+  if (res.ok) { await loadSettings(); setTimeout(()=>{ $("setMsg").textContent=""; }, 3500); }
+};
 
-async function preview() {
-  const n = encodeURIComponent($("p_number").value.trim());
-  const out = await (await fetch("/api/preview?number=" + n)).json();
-  $("previewOut").innerHTML =
-    `<p style="margin:12px 0 6px">${out.matched
-      ? '<span class="pill ok">matched ' + esc(out.customer) + "</span>"
-      : '<span class="pill bad">no match</span>'}</p>
-     <label>Greeting instruction</label><pre>${esc(out.greeting)}</pre>
-     <label>Accept-time instructions</label><pre>${esc(out.instructions)}</pre>`;
-}
+window.preview = async function(){
+  const out = await (await fetch("/api/preview?number=" + encodeURIComponent($("p_number").value.trim()))).json();
+  $("previewOut").innerHTML = `
+    <p style="margin:14px 0 8px">${out.matched
+      ? `<span class="pill ok">${esc(out.customer)}</span> <span class="pill">${esc(out.language)}</span>
+         ${out.arabic_variant && out.arabic_variant!=="default" ? `<span class="pill gold">${esc(out.arabic_variant)}</span>`:""}`
+      : `<span class="pill bad">no match</span>`}</p>
+    <label>Accept payload</label>
+    <pre>${esc(JSON.stringify(out.accept_body.audio, null, 2))}</pre>
+    <label>Instructions (${out.instructions.length} chars)</label>
+    <pre>${esc(out.instructions)}</pre>`;
+  reveal("#previewOut", { opacity:[0,1] }, { duration:.3 });
+};
 
+/* ---------- boot ---------- */
+setLang(localStorage.getItem("cbq-lang") || "en");
 loadCustomers();
 loadSettings();
+loadStats();
+const startView = new URLSearchParams(location.search).get("view")
+               || (location.hash ? location.hash.slice(1) : null);
+if (startView) showView(startView, false);
+
+/* Background refresh. Only polls what is on screen, and stops entirely when
+   the tab is hidden so a console left open overnight is not hammering the
+   server or the database. */
+setInterval(() => {
+  if (document.hidden) return;
+  if ($("view-calls").classList.contains("active")) loadCalls();
+  else if ($("view-overview").classList.contains("active")) loadStats();
+}, 4000);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && $("view-calls").classList.contains("active")) loadCalls(true);
+});
 </script>
 </body>
 </html>
