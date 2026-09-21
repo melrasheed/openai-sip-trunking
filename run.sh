@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Creates the virtual environment, installs requirements, and starts the
-# Python SIP webhook server. Safe to re-run.
+# contextualised banking voice agent. Safe to re-run.
 #
 #   ./run.sh              start on PORT from .env (default 8000)
 #   PORT=8100 ./run.sh    start on a different port
+#   ./run.sh --seed       reseed the demo customers before starting
 #   ./run.sh --reinstall  recreate the virtual environment
 set -euo pipefail
 
@@ -13,10 +14,13 @@ VENV_DIR=".venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STAMP="$VENV_DIR/.requirements.sha256"
 
-if [[ "${1:-}" == "--reinstall" && -d "$VENV_DIR" ]]; then
-  echo "Removing existing virtual environment..."
-  rm -rf "$VENV_DIR"
-fi
+SEED=0
+for arg in "$@"; do
+  case "$arg" in
+    --reinstall) [[ -d "$VENV_DIR" ]] && { echo "Removing existing virtual environment..."; rm -rf "$VENV_DIR"; } ;;
+    --seed) SEED=1 ;;
+  esac
+done
 
 if [[ ! -x "$VENV_PYTHON" ]]; then
   PYTHON=""
@@ -52,5 +56,10 @@ if [[ ! -f .env ]]; then
   echo "WARNING: no .env found. Copy .env.example to .env and fill in your Azure OpenAI values." >&2
 fi
 
-echo "Starting the Python server (Ctrl+C to stop)..."
+if [[ "$SEED" == "1" ]]; then
+  echo "Reseeding the demo customer data..."
+  "$VENV_PYTHON" -c "import sys; sys.path.insert(0, 'src'); import db; print('Seeded', db.seed(force=True), 'customers')"
+fi
+
+echo "Starting the agent (Ctrl+C to stop). UI: http://127.0.0.1:${PORT:-8000}/"
 exec "$VENV_PYTHON" -u src/app.py

@@ -1,15 +1,17 @@
 <#
 .SYNOPSIS
     Creates the virtual environment, installs requirements, and starts the
-    Python SIP webhook server.
+    contextualised banking voice agent.
 
 .DESCRIPTION
     Safe to re-run: the virtual environment is only created once, and
     dependencies are reinstalled only when requirements.txt changes.
+    The demo database is created and seeded automatically on first start.
 
 .EXAMPLE
     .\run.ps1
     .\run.ps1 -Port 8100
+    .\run.ps1 -Seed
     .\run.ps1 -Reinstall
 #>
 [CmdletBinding()]
@@ -18,7 +20,10 @@ param(
     [int]$Port,
 
     # Recreate the virtual environment from scratch.
-    [switch]$Reinstall
+    [switch]$Reinstall,
+
+    # Replace the customer table with the demo seed data before starting.
+    [switch]$Seed
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,5 +81,12 @@ if (-not (Test-Path (Join-Path $PSScriptRoot '.env'))) {
 
 if ($PSBoundParameters.ContainsKey('Port')) { $env:PORT = "$Port" }
 
-Write-Host 'Starting the Python server (Ctrl+C to stop)...' -ForegroundColor Green
+if ($Seed) {
+    Write-Host 'Reseeding the demo customer data...' -ForegroundColor Cyan
+    & $venvPython -c "import sys; sys.path.insert(0, 'src'); import db; print('Seeded', db.seed(force=True), 'customers')"
+    if ($LASTEXITCODE -ne 0) { throw 'Seeding failed' }
+}
+
+$uiPort = if ($env:PORT) { $env:PORT } else { '8000' }
+Write-Host "Starting the agent (Ctrl+C to stop). UI: http://127.0.0.1:$uiPort/" -ForegroundColor Green
 & $venvPython -u (Join-Path $PSScriptRoot 'src\app.py')

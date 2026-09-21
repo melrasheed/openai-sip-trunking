@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banking Voice Agent — Demo Console</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #171e2e; --panel-2: #1e2739; --line: #2a3346;
+    --text: #e7ecf5; --muted: #93a0b8; --accent: #4f8cff; --ok: #35c28e;
+    --warn: #f0b429; --bad: #f2555a; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.55 "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .banner {
+    background: rgba(240,180,41,.12); border: 1px solid rgba(240,180,41,.4);
+    color: var(--warn); padding: 8px 14px; border-radius: var(--radius);
+    font-size: 12px; margin: 14px 24px 0;
+  }
+  nav { display: flex; gap: 6px; padding: 16px 24px 0; }
+  nav button {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    padding: 9px 16px; border-radius: var(--radius); cursor: pointer; font-size: 14px;
+  }
+  nav button.active { background: var(--panel); color: var(--text); border-color: var(--line); }
+  main { padding: 16px 24px 48px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
+  }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .col { flex: 1 1 380px; min-width: 320px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  tr.clickable:hover { background: var(--panel-2); cursor: pointer; }
+  .ar { direction: rtl; unicode-bidi: isolate; font-size: 15px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  input, select, textarea {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--text); padding: 8px 10px; border-radius: 8px; font: inherit;
+  }
+  textarea { min-height: 96px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  button.action {
+    background: var(--accent); border: 0; color: #fff; padding: 9px 16px;
+    border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500;
+  }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  button.danger { background: var(--bad); }
+  .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pill { padding: 2px 9px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: rgba(53,194,142,.4); }
+  .pill.live { color: var(--accent); border-color: rgba(79,140,255,.5); }
+  .pill.bad { color: var(--bad); border-color: rgba(242,85,90,.4); }
+  .transcript { max-height: 460px; overflow-y: auto; }
+  .line { padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .line .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .line.assistant .who { color: var(--accent); }
+  .line.caller .who { color: var(--ok); }
+  .line.system { opacity: .65; font-size: 12px; }
+  .muted { color: var(--muted); }
+  pre { background: var(--panel-2); padding: 12px; border-radius: 8px; overflow-x: auto;
+        white-space: pre-wrap; font-size: 12px; border: 1px solid var(--line); }
+  .hide { display: none; }
+  .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Banking Voice Agent — Demo Console</h1>
+    <div class="sub">Azure OpenAI GPT Realtime over SIP</div>
+  </div>
+  <div style="margin-left:auto" class="sub" id="envInfo"></div>
+</header>
+
+<div class="banner">
+  <strong>Demo only.</strong> Every customer record here is fictional. This console has no
+  authentication, so anyone who can reach this URL — including through your dev tunnel — can read
+  and edit it. Never put real customer data in it.
+</div>
+
+<nav>
+  <button data-tab="customers" class="active">Customers</button>
+  <button data-tab="calls">Calls</button>
+  <button data-tab="settings">Agent settings</button>
+</nav>
+
+<main>
+
+  <!-- Customers ------------------------------------------------------------>
+  <section id="tab-customers">
+    <div class="row">
+      <div class="col" style="flex:2 1 560px">
+        <div class="panel">
+          <div class="toolbar">
+            <strong>Customers</strong>
+            <span class="muted" id="custCount"></span>
+            <span style="margin-left:auto"></span>
+            <button class="action ghost" onclick="newCustomer()">Add customer</button>
+            <button class="action ghost" onclick="reseed()">Reseed demo data</button>
+          </div>
+          <table style="margin-top:12px">
+            <thead><tr><th>Name</th><th>Arabic</th><th>Mobile</th><th>Lang</th><th>Segment</th><th>Balance</th></tr></thead>
+            <tbody id="custRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="panel" id="custForm">
+          <strong id="formTitle">Add customer</strong>
+          <div class="row">
+            <div class="col" style="min-width:150px">
+              <label>Full name (English) *</label><input id="f_full_name_en">
+              <label>Mobile (E.164) *</label><input id="f_mobile_e164" placeholder="+97455512345">
+              <label>Preferred language</label>
+              <select id="f_preferred_language"><option value="en">English</option><option value="ar">Arabic</option></select>
+              <label>Account type</label><input id="f_account_type">
+              <label>Balance</label><input id="f_balance" type="number" step="0.01">
+              <label>Currency</label><input id="f_currency" value="QAR">
+              <label>Segment</label><input id="f_segment">
+              <label>Home branch</label><input id="f_branch">
+              <label>Card status</label><input id="f_card_status">
+            </div>
+            <div class="col" style="min-width:150px">
+              <label>Full name (Arabic)</label><input id="f_full_name_ar" class="ar">
+              <label>Last transaction amount</label><input id="f_last_txn_amount" type="number" step="0.01">
+              <label>Last transaction merchant</label><input id="f_last_txn_merchant">
+              <label>Last transaction date</label><input id="f_last_txn_date" placeholder="2026-09-14">
+              <label>Open case</label><input id="f_open_case">
+              <label>Relationship manager</label><input id="f_relationship_manager">
+              <label>KYC status</label><input id="f_kyc_status">
+              <label>KYC expiry</label><input id="f_kyc_expiry" placeholder="2027-03-01">
+              <label>Loan summary</label><input id="f_loan_summary">
+            </div>
+          </div>
+          <div class="actions">
+            <button class="action" onclick="saveCustomer()">Save</button>
+            <button class="action ghost" onclick="newCustomer()">Clear</button>
+            <button class="action danger hide" id="deleteBtn" onclick="deleteCustomer()">Delete</button>
+          </div>
+          <div class="muted" id="custMsg" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Calls ---------------------------------------------------------------->
+  <section id="tab-calls" class="hide">
+    <div class="row">
+      <div class="col">
+        <div class="panel">
+          <div class="toolbar">
+            <strong>Call history</strong>
+            <button class="action ghost" style="margin-left:auto" onclick="loadCalls()">Refresh</button>
+          </div>
+          <table style="margin-top:12px">
+            <thead><tr><th>When</th><th>From</th><th>Matched</th><th>Lang</th><th>Status</th></tr></thead>
+            <tbody id="callRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <div class="toolbar">
+            <strong>Transcript</strong>
+            <span id="liveBadge"></span>
+            <span class="muted" id="callMeta" style="margin-left:auto"></span>
+          </div>
+          <div class="transcript" id="transcript">
+            <p class="muted">Select a call to see its transcript. A call in progress updates live.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Settings ------------------------------------------------------------->
+  <section id="tab-settings" class="hide">
+    <div class="row">
+      <div class="col">
+        <div class="panel">
+          <strong>Agent settings</strong>
+          <p class="muted" style="font-size:12px">
+            Saved to the database and read at the start of each call, so changes apply to the
+            next call without restarting. Leave a field empty to fall back to <code>.env</code>.
+          </p>
+          <label>Base instructions</label>
+          <textarea id="s_instructions"></textarea>
+          <label>Fallback greeting (used for unrecognised callers)</label>
+          <input id="s_greeting">
+          <label>Voice</label>
+          <input id="s_voice" placeholder="leave empty for the service default">
+          <div class="actions">
+            <button class="action" onclick="saveSettings()">Save</button>
+          </div>
+          <div class="muted" id="setMsg" style="margin-top:10px"></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <strong>Preview contextualisation</strong>
+          <p class="muted" style="font-size:12px">
+            Enter a number to see exactly what the agent would be told if that number called now.
+          </p>
+          <label>Caller number</label>
+          <input id="p_number" placeholder="+97455512345" value="+97455512345">
+          <div class="actions"><button class="action ghost" onclick="preview()">Preview</button></div>
+          <div id="previewOut"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+const FIELDS = ["full_name_en","full_name_ar","mobile_e164","preferred_language","account_type",
+  "balance","currency","segment","last_txn_amount","last_txn_merchant","last_txn_date",
+  "open_case","card_status","relationship_manager","branch","kyc_status","kyc_expiry","loan_summary"];
+
+let editingId = null, selectedCall = null, lastLineId = 0, pollTimer = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+document.querySelectorAll("nav button").forEach(btn => btn.onclick = () => {
+  document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  ["customers","calls","settings"].forEach(t =>
+    $("tab-" + t).classList.toggle("hide", t !== btn.dataset.tab));
+  if (btn.dataset.tab === "calls") loadCalls();
+  if (btn.dataset.tab === "settings") loadSettings();
+});
+
+// --- Customers -------------------------------------------------------------
+async function loadCustomers() {
+  const rows = await (await fetch("/api/customers")).json();
+  $("custCount").textContent = rows.length + " records";
+  $("custRows").innerHTML = rows.map(c => `
+    <tr class="clickable" onclick="editCustomer(${c.id})">
+      <td>${esc(c.full_name_en)}</td>
+      <td class="ar">${esc(c.full_name_ar)}</td>
+      <td>${esc(c.mobile_e164)}</td>
+      <td>${c.preferred_language === "ar" ? "العربية" : "English"}</td>
+      <td>${esc(c.segment)}</td>
+      <td>${c.balance == null ? "" : esc(c.currency || "") + " " + Number(c.balance).toLocaleString()}</td>
+    </tr>`).join("");
+  window._customers = rows;
+}
+
+function newCustomer() {
+  editingId = null;
+  FIELDS.forEach(f => { const el = $("f_" + f); if (el) el.value = ""; });
+  $("f_currency").value = "QAR";
+  $("f_preferred_language").value = "en";
+  $("formTitle").textContent = "Add customer";
+  $("deleteBtn").classList.add("hide");
+  $("custMsg").textContent = "";
+}
+
+function editCustomer(id) {
+  const c = (window._customers || []).find(x => x.id === id);
+  if (!c) return;
+  editingId = id;
+  FIELDS.forEach(f => { const el = $("f_" + f); if (el) el.value = c[f] ?? ""; });
+  $("formTitle").textContent = "Edit " + c.full_name_en;
+  $("deleteBtn").classList.remove("hide");
+  $("custMsg").textContent = "";
+  $("custForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function saveCustomer() {
+  const body = {};
+  FIELDS.forEach(f => {
+    const el = $("f_" + f);
+    if (!el) return;
+    let v = el.value.trim();
+    if (["balance","last_txn_amount"].includes(f)) { body[f] = v === "" ? null : Number(v); return; }
+    body[f] = v === "" ? null : v;
+  });
+  if (!body.full_name_en || !body.mobile_e164) {
+    $("custMsg").textContent = "Name and mobile number are required.";
+    return;
+  }
+  const res = await fetch(editingId ? "/api/customers/" + editingId : "/api/customers", {
+    method: editingId ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const out = await res.json();
+  $("custMsg").textContent = res.ok ? "Saved." : ("Error: " + (out.error || res.status));
+  if (res.ok) { const wasNew = !editingId; await loadCustomers(); if (wasNew) newCustomer(); }
+}
+
+async function deleteCustomer() {
+  if (!editingId || !confirm("Delete this customer?")) return;
+  await fetch("/api/customers/" + editingId, { method: "DELETE" });
+  newCustomer(); loadCustomers();
+}
+
+async function reseed() {
+  if (!confirm("Replace all customers with the demo seed data?")) return;
+  const out = await (await fetch("/api/seed", { method: "POST" })).json();
+  $("custMsg").textContent = "Reseeded " + out.inserted + " customers.";
+  newCustomer(); loadCustomers();
+}
+
+// --- Calls -----------------------------------------------------------------
+async function loadCalls() {
+  const rows = await (await fetch("/api/calls")).json();
+  $("callRows").innerHTML = rows.length ? rows.map(c => `
+    <tr class="clickable" onclick="selectCall('${esc(c.call_id)}','${esc(c.status)}')">
+      <td>${esc((c.started_at || "").replace("T", " ").slice(0, 19))}</td>
+      <td>${esc(c.from_number || "unknown")}</td>
+      <td>${c.matched ? esc(c.full_name_en) : '<span class="muted">no match</span>'}</td>
+      <td>${esc(c.language || "")}</td>
+      <td><span class="pill ${c.status === "in_progress" ? "live" : c.status === "failed" ? "bad" : "ok"}">${esc(c.status)}</span></td>
+    </tr>`).join("") : '<tr><td colspan="5" class="muted">No calls yet. Ring your SIP number.</td></tr>';
+}
+
+function selectCall(callId, status) {
+  selectedCall = callId; lastLineId = 0;
+  $("transcript").innerHTML = "";
+  $("callMeta").textContent = callId;
+  clearInterval(pollTimer);
+  fetchTranscript();
+  if (status === "in_progress") {
+    $("liveBadge").innerHTML = '<span class="pill live">live</span>';
+    pollTimer = setInterval(fetchTranscript, 1000);
+  } else {
+    $("liveBadge").innerHTML = "";
+  }
+}
+
+async function fetchTranscript() {
+  if (!selectedCall) return;
+  const lines = await (await fetch(`/api/calls/${encodeURIComponent(selectedCall)}/transcript?after=${lastLineId}`)).json();
+  if (!lines.length) return;
+  const box = $("transcript");
+  lines.forEach(l => {
+    lastLineId = Math.max(lastLineId, l.id);
+    const div = document.createElement("div");
+    div.className = "line " + l.role;
+    div.innerHTML = `<div class="who">${esc(l.role)}</div><div>${esc(l.text)}</div>`;
+    box.appendChild(div);
+  });
+  box.scrollTop = box.scrollHeight;
+}
+
+// --- Settings --------------------------------------------------------------
+async function loadSettings() {
+  const s = await (await fetch("/api/settings")).json();
+  $("s_instructions").value = s.instructions || "";
+  $("s_greeting").value = s.greeting || "";
+  $("s_voice").value = s.voice || "";
+  $("envInfo").textContent = `${s.deployment} · transcription: ${s.transcription || "assistant only"}`;
+}
+
+async function saveSettings() {
+  const res = await fetch("/api/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      instructions: $("s_instructions").value,
+      greeting: $("s_greeting").value,
+      voice: $("s_voice").value
+    })
+  });
+  $("setMsg").textContent = res.ok ? "Saved. Applies to the next call." : "Save failed.";
+}
+
+async function preview() {
+  const n = encodeURIComponent($("p_number").value.trim());
+  const out = await (await fetch("/api/preview?number=" + n)).json();
+  $("previewOut").innerHTML =
+    `<p style="margin:12px 0 6px">${out.matched
+      ? '<span class="pill ok">matched ' + esc(out.customer) + "</span>"
+      : '<span class="pill bad">no match</span>'}</p>
+     <label>Greeting instruction</label><pre>${esc(out.greeting)}</pre>
+     <label>Accept-time instructions</label><pre>${esc(out.instructions)}</pre>`;
+}
+
+loadCustomers();
+loadSettings();
+</script>
+</body>
+</html>
