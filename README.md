@@ -39,7 +39,8 @@ and [Azure OpenAI webhooks](https://learn.microsoft.com/en-us/azure/foundry/open
   > underlying model name. This is the most common migration mistake.
 - Role assignment **Cognitive Services User** or **Cognitive Services Contributor** on the resource.
 - An account with a **SIP trunking provider** and a **phone number** purchased from them.
-- **Node.js 20 or later**.
+- **Node.js 20 or later** for the TypeScript implementation, or **Python 3.10 or later** for the
+  Python one.
 - For local development: the [**`devtunnel` CLI**](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started)
   (or any HTTPS tunnel), plus a Microsoft or GitHub account to sign in with.
 
@@ -356,22 +357,56 @@ To turn calls away *before* answering, add the decision inside `handleWebhook` i
 
 ## Project layout
 
+Two interchangeable implementations of the same server. Both read the same `.env`, expose the
+same `/webhook` route, and follow the
+[OpenAI SIP guide](https://developers.openai.com/api/docs/guides/voice-sip?api=realtime):
+verify the webhook, `POST .../accept`, open the monitoring WebSocket, send `response.create`.
+The only deviations are the three Azure requires — the `/openai/v1` base URL, the `api-key`
+header, and `model` being a deployment name.
+
 ```
 src/
-  index.ts              The whole server: config, call control, WebSocket, webhook
+  index.ts              TypeScript implementation (Express + ws)
+  app.py                Python implementation (Flask + websockets)
 scripts/
   webhook-endpoints.ts  create | list | delete webhook endpoints
   send-test-webhook.ts  Locally signed webhook for offline verification
 infra/
   main.bicep            App Service plan + web app
   main.parameters.json  Non-secret parameters
+run.ps1 / run.sh        Create the venv, install requirements, start the Python server
+requirements.txt        Python dependencies
 ```
 
-`src/index.ts` follows the
-[OpenAI SIP guide](https://developers.openai.com/api/docs/guides/voice-sip?api=realtime)
-directly: verify the webhook, `POST .../accept`, open the monitoring WebSocket, send
-`response.create`. The only deviations are the three Azure requires — the `/openai/v1` base URL,
-the `api-key` header, and `model` being a deployment name.
+Run **one** of them at a time — they both bind the same port.
+
+### Running the Python implementation
+
+`run.ps1` (Windows) and `run.sh` (macOS/Linux) create `.venv`, install `requirements.txt`, and
+start the server. They are safe to re-run: the virtual environment is created once, and
+dependencies are reinstalled only when `requirements.txt` changes.
+
+```powershell
+.\run.ps1                # start on PORT from .env (default 8000)
+.\run.ps1 -Port 8100     # override the port
+.\run.ps1 -Reinstall     # recreate the virtual environment
+```
+
+```bash
+./run.sh
+PORT=8100 ./run.sh
+./run.sh --reinstall
+```
+
+To run it by hand instead:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt   # .venv\Scripts\pip on Windows
+.venv/bin/python -u src/app.py
+```
+
+`npm run webhook:test` and the webhook management scripts work against either implementation.
 
 ### npm scripts
 
@@ -386,8 +421,8 @@ the `api-key` header, and `model` being a deployment name.
 | `npm run webhook:delete -- <id>` | Delete a webhook endpoint |
 | `npm run webhook:test` | Send a signed test webhook locally |
 
-The `openai` package is a dependency solely for Standard Webhooks signature verification; no request
-is ever sent to `api.openai.com`.
+The `openai` package — in both Node and Python — is used solely for Standard Webhooks signature
+verification; no request is ever sent to `api.openai.com`.
 
 ---
 
