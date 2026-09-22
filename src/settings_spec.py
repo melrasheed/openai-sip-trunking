@@ -5,9 +5,11 @@ accept payload can carry only the values that actually differ from the
 service defaults.
 
 Grouped as the console presents them:
-  basic    — voices per language, playback speed, transcription
+  basic    — voices per language, delivery style, playback speed, transcription
   advanced — turn detection, sampling
 """
+
+import context
 
 # name -> (default, kind, group, help)
 SPEC = {
@@ -37,6 +39,13 @@ SPEC = {
         "basic",
         "Voice used when the caller's preferred language is Arabic.",
     ),
+    "voice_style": (
+        context.DEFAULT_VOICE_STYLE,
+        "str",
+        "basic",
+        "How the agent should sound. Folded into the system prompt as the delivery style. "
+        "An Arabic style set on a customer's profile still has the final word on register.",
+    ),
     "speed": (
         1.0,
         "float",
@@ -48,12 +57,6 @@ SPEC = {
         "str",
         "basic",
         "Model used to transcribe the caller. Empty disables caller transcription.",
-    ),
-    "transcription_language": (
-        "",
-        "str",
-        "basic",
-        "Optional ISO-639-1 hint such as ar or en. Improves accuracy and latency.",
     ),
     # --- advanced ----------------------------------------------------------
     "turn_detection_type": (
@@ -121,7 +124,7 @@ LIMITS = {
 # Settings where an empty string is meaningful: it switches the feature off.
 # Everything else falls back to its default when blank, so an accidentally
 # cleared dropdown cannot send an invalid value to the service.
-BLANKABLE = {"transcription_model", "transcription_language"}
+BLANKABLE = {"transcription_model"}
 VOICES = [
     "alloy", "ash", "ballad", "cedar", "coral",
     "echo", "marin", "sage", "shimmer", "verse",
@@ -173,8 +176,30 @@ def resolve(stored):
         resolved["turn_detection_type"] = SPEC["turn_detection_type"][0]
     if resolved.get("vad_eagerness") not in EAGERNESS_LEVELS:
         resolved["vad_eagerness"] = SPEC["vad_eagerness"][0]
+    if resolved.get("voice_style") not in context.VOICE_STYLES:
+        resolved["voice_style"] = context.DEFAULT_VOICE_STYLE
 
     return resolved
+
+
+def choices_for(name):
+    """The allowed values for a setting, or None when it is free text."""
+    if name in ("voice_en", "voice_ar"):
+        return VOICES
+    if name == "turn_detection_type":
+        return TURN_DETECTION_TYPES
+    if name == "vad_eagerness":
+        return EAGERNESS_LEVELS
+    if name == "voice_style":
+        return list(context.VOICE_STYLES)
+    return None
+
+
+def choice_labels_for(name):
+    """Readable labels for choices whose stored value is an id, else None."""
+    if name == "voice_style":
+        return {key: label for key, (label, _prompt) in context.VOICE_STYLES.items()}
+    return None
 
 
 def describe(values):
@@ -189,15 +214,8 @@ def describe(values):
             "help": help_text,
             "min": LIMITS.get(name, (None, None))[0],
             "max": LIMITS.get(name, (None, None))[1],
-            "choices": (
-                VOICES
-                if name in ("voice_en", "voice_ar")
-                else TURN_DETECTION_TYPES
-                if name == "turn_detection_type"
-                else EAGERNESS_LEVELS
-                if name == "vad_eagerness"
-                else None
-            ),
+            "choices": choices_for(name),
+            "choice_labels": choice_labels_for(name),
         }
         for name, (default, kind, group, help_text) in SPEC.items()
     ]
@@ -208,6 +226,11 @@ def build_audio(values, language):
 
     Only values that differ from the service default are included, so the
     request stays as close as possible to the one already known to work.
+
+    `language` is the matched customer's preferred language, or None when the
+    caller's number matched no record. It picks the voice and doubles as the
+    caller-transcription hint, so the hint always follows the profile rather
+    than an operator setting; an unknown caller is left to auto-detection.
     """
     voice = values.get("voice_ar" if language == "ar" else "voice_en")
     output = {}
@@ -221,9 +244,8 @@ def build_audio(values, language):
     model = (values.get("transcription_model") or "").strip()
     if model:
         transcription = {"model": model}
-        language_hint = (values.get("transcription_language") or "").strip()
-        if language_hint:
-            transcription["language"] = language_hint
+        if language in context.LANGUAGE_NAMES:
+            transcription["language"] = language
         audio_input["transcription"] = transcription
 
     turn = build_turn_detection(values)

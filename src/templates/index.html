@@ -315,7 +315,7 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
           <div>
             <div class="section-head"><h2 data-i18n="callHistory">Call history</h2>
               <div class="spacer"></div>
-              <button class="btn sm ghost" onclick="loadCalls()" data-i18n="refresh">Refresh</button></div>
+              <span class="hint" style="margin:0" data-i18n="autoRefresh">Updates automatically</span></div>
             <div class="card"><table>
               <thead><tr><th data-i18n="thWhen">When</th><th data-i18n="thFrom">From</th>
                 <th data-i18n="thMatched">Matched</th><th data-i18n="thStatus">Status</th></tr></thead>
@@ -339,11 +339,6 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
           <div>
             <div class="section-head"><h2 data-i18n="basicSettings">Basic</h2></div>
             <div class="card card-pad">
-              <div class="field">
-                <label data-i18n="baseInstructions">Base instructions</label>
-                <textarea id="s_instructions"></textarea>
-                <div class="hint" data-i18n="baseInstructionsHelp">The agent's role. The customer profile, Arabic style and opening directive are appended automatically.</div>
-              </div>
               <div id="basicSettings"></div>
               <div class="row" style="margin-top:6px">
                 <button class="btn" onclick="saveSettings()" data-i18n="save">Save</button>
@@ -356,24 +351,50 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
               <summary data-i18n="turnDetection">Turn detection and response limits</summary>
               <div class="inner" id="advSettings"></div>
             </details>
+
+            <details class="adv" style="margin-top:12px">
+              <summary data-i18n="finalPrompt">Final system prompt</summary>
+              <div class="inner">
+                <div class="banner" style="margin-top:14px">
+                  <span>⚠</span>
+                  <span data-i18n="finalPromptWarning">This is the entire prompt sent when a call is accepted. Editing it changes what every caller hears, and removing a placeholder removes that section — drop {profile} and the agent no longer knows who is calling.</span>
+                </div>
+                <p class="hint" style="margin-top:0" data-i18n="finalPromptHelp">
+                  The placeholders below are filled in per call from the caller's profile and the settings above.
+                </p>
+                <div id="placeholderLegend" class="hint"></div>
+                <div class="field">
+                  <textarea id="s_template" spellcheck="false"
+                            style="min-height:320px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px"></textarea>
+                </div>
+                <div class="row">
+                  <button class="btn" onclick="saveSettings()" data-i18n="savePrompt">Save prompt</button>
+                  <button class="btn ghost" onclick="resetTemplate()" data-i18n="resetPrompt">Reset to default</button>
+                  <span class="hint" id="tplMsg"></span>
+                </div>
+              </div>
+            </details>
           </div>
 
           <div>
             <div class="section-head"><h2 data-i18n="arabicStyles">Arabic styles</h2></div>
-            <div class="card card-pad">
-              <p class="hint" style="margin-top:0" data-i18n="arabicStylesHelp">
-                Applied only to customers whose preferred language is Arabic, according to the style chosen on their profile.
-              </p>
-              <div class="field">
-                <label>Faseeh — <span data-i18n="faseehDesc">Modern Standard Arabic</span></label>
-                <textarea id="p_faseeh" class="ar" dir="rtl"></textarea>
+            <details class="adv">
+              <summary data-i18n="arabicStylesSummary">Dialect prompts (Faseeh and Qatari)</summary>
+              <div class="inner">
+                <p class="hint" data-i18n="arabicStylesHelp">
+                  Applied only to customers whose preferred language is Arabic, according to the style chosen on their profile. The dialect prompt comes after the delivery style, so it has the final word on register.
+                </p>
+                <div class="field">
+                  <label>Faseeh — <span data-i18n="faseehDesc">Modern Standard Arabic</span></label>
+                  <textarea id="p_faseeh" class="ar" dir="rtl"></textarea>
+                </div>
+                <div class="field">
+                  <label>Qatari — <span data-i18n="qatariDesc">Doha dialect</span></label>
+                  <textarea id="p_qatari" class="ar" dir="rtl"></textarea>
+                </div>
+                <button class="btn" onclick="saveSettings()" data-i18n="savePrompts">Save styles</button>
               </div>
-              <div class="field">
-                <label>Qatari — <span data-i18n="qatariDesc">Doha dialect</span></label>
-                <textarea id="p_qatari" class="ar" dir="rtl"></textarea>
-              </div>
-              <button class="btn" onclick="saveSettings()" data-i18n="savePrompts">Save styles</button>
-            </div>
+            </details>
 
             <div class="section-head" style="margin-top:20px"><h2 data-i18n="preview">Preview</h2></div>
             <div class="card card-pad">
@@ -484,8 +505,8 @@ const NUMERIC = ["balance","last_txn_amount"];
 const LABELS = {
   bank_name_en:"Bank name · English", bank_name_ar:"Bank name · Arabic",
   voice_en:"Voice · English caller", voice_ar:"Voice · Arabic caller",
-  speed:"Playback speed", transcription_model:"Transcription model",
-  transcription_language:"Transcription language hint",
+  voice_style:"Delivery style", speed:"Playback speed",
+  transcription_model:"Transcription model",
   turn_detection_type:"Turn detection", vad_threshold:"Speech threshold",
   vad_prefix_padding_ms:"Prefix padding (ms)", vad_silence_duration_ms:"End-of-turn silence (ms)",
   vad_eagerness:"Semantic eagerness", create_response:"Reply automatically",
@@ -498,11 +519,15 @@ const I18N = {
     step1t:"التعرّف",step2t:"المطابقة",step3t:"التخصيص",step4t:"المحادثة",
     addCustomer:"إضافة عميل",reseed:"إعادة التعبئة",thCustomer:"العميل",thMobile:"الجوال",
     thLanguage:"اللغة",thSegment:"الشريحة",thBalance:"الرصيد",callHistory:"سجل المكالمات",
-    refresh:"تحديث",thWhen:"الوقت",thFrom:"من",thMatched:"مطابق",thStatus:"الحالة",
+    autoRefresh:"يتم التحديث تلقائيًا",thWhen:"الوقت",thFrom:"من",thMatched:"مطابق",thStatus:"الحالة",
     transcript:"النص",basicSettings:"الإعدادات الأساسية",advanced:"إعدادات متقدمة",
-    baseInstructions:"التعليمات الأساسية",save:"حفظ",cancel:"إلغاء",
+    save:"حفظ",cancel:"إلغاء",
     delete:"حذف",arabicStyles:"الأساليب العربية",preview:"معاينة",run:"تشغيل",
     savePrompts:"حفظ الأساليب",turnDetection:"كشف الأدوار وحدود الرد",
+    arabicStylesSummary:"نصوص اللهجات (الفصحى والقطرية)",
+    finalPrompt:"التعليمات النهائية للنظام",savePrompt:"حفظ التعليمات",resetPrompt:"استعادة الافتراضي",
+    finalPromptWarning:"هذه هي التعليمات الكاملة المرسلة عند قبول المكالمة. تعديلها يغيّر ما يسمعه كل متصل، وحذف أي عنصر نائب يحذف ذلك القسم — فإذا حذفت {profile} لن يعرف الوكيل هوية المتصل.",
+    finalPromptHelp:"تُملأ العناصر النائبة أدناه لكل مكالمة من ملف العميل ومن الإعدادات أعلاه.",
     fsIdentity:"الهوية",fsContact:"التواصل واللغة",fsAccount:"الحساب",fsActivity:"النشاط والخدمة",
     nameEn:"الاسم (إنجليزي) *",nameAr:"الاسم (عربي)",mobile:"الجوال *",prefLang:"اللغة المفضلة",
     arabicStyle:"الأسلوب العربي",accountType:"نوع الحساب",segment:"الشريحة",balance:"الرصيد",
@@ -799,10 +824,11 @@ async function fetchTranscript(){
 function controlFor(s){
   const id = "cfg_" + s.name;
   const label = (LABELS[s.name] || s.name.replace(/_/g," ").replace(/\b\w/g, m => m.toUpperCase()));
+  const labelFor = c => (s.choice_labels && s.choice_labels[c]) || c;
   let input;
   if (s.choices) {
     input = `<select id="${id}">${s.choices.map(c =>
-      `<option value="${esc(c)}"${String(s.value)===c?" selected":""}>${esc(c)}</option>`).join("")}</select>`;
+      `<option value="${esc(c)}"${String(s.value)===c?" selected":""}>${esc(labelFor(c))}</option>`).join("")}</select>`;
   } else if (s.type === "bool") {
     input = `<select id="${id}"><option value="true"${s.value?" selected":""}>Enabled</option>
              <option value="false"${!s.value?" selected":""}>Disabled</option></select>`;
@@ -813,31 +839,48 @@ function controlFor(s){
   } else {
     input = `<input id="${id}" value="${esc(s.value)}">`;
   }
+  const dflt = (s.choice_labels && s.choice_labels[s.default]) || s.default;
   return `<div class="field"><label>${esc(label)}</label>${input}
-    <div class="hint">${esc(s.help)} <em>Default: ${esc(String(s.default))}</em></div></div>`;
+    <div class="hint">${esc(s.help)} <em>Default: ${esc(String(dflt))}</em></div></div>`;
 }
 
 window.loadSettings = async function(){
   const s = await (await fetch("/api/settings")).json();
   state.settings = s; state.variants = s.arabic_variants;
-  $("s_instructions").value = s.instructions || "";
-    $("p_faseeh").value = (s.prompts||{}).faseeh || "";
+  $("s_template").value = s.template || "";
+  $("p_faseeh").value = (s.prompts||{}).faseeh || "";
   $("p_qatari").value = (s.prompts||{}).qatari || "";
+  $("placeholderLegend").innerHTML = Object.entries(s.placeholders || {}).map(([name, help]) =>
+    `<div><code>{${esc(name)}}</code> — ${esc(help)}</div>`).join("");
   $("basicSettings").innerHTML = s.settings.filter(x => x.group==="basic").map(controlFor).join("");
   $("advSettings").innerHTML = s.settings.filter(x => x.group==="advanced").map(controlFor).join("");
   $("envPill").textContent = s.deployment;
 };
 
 window.saveSettings = async function(){
-  const body = { instructions:$("s_instructions").value,
+  const body = { template:$("s_template").value,
                  prompts:{ faseeh:$("p_faseeh").value, qatari:$("p_qatari").value } };
   (state.settings?.settings || []).forEach(s => {
     const el = $("cfg_" + s.name); if (el) body[s.name] = el.value;
   });
   const res = await fetch("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"},
                                             body:JSON.stringify(body)});
-  $("setMsg").textContent = res.ok ? "Saved — applies to the next call." : "Save failed.";
-  if (res.ok) { await loadSettings(); setTimeout(()=>{ $("setMsg").textContent=""; }, 3500); }
+  const out = await res.json().catch(() => ({}));
+  // A rejected template must not look like a successful save, and its reason
+  // belongs next to the editor rather than in the console log.
+  const message = res.ok
+    ? ((out.warnings || []).join(" ") || "Saved — applies to the next call.")
+    : (out.error || "Save failed.");
+  $("setMsg").textContent = message;
+  $("tplMsg").textContent = message;
+  if (res.ok) { await loadSettings(); setTimeout(()=>{ $("setMsg").textContent=""; $("tplMsg").textContent=""; }, 6000); }
+};
+
+window.resetTemplate = async function(){
+  if (!confirm("Restore the shipped system prompt? Your edits to it will be lost.")) return;
+  const res = await fetch("/api/settings/reset-template", {method:"POST"});
+  $("tplMsg").textContent = res.ok ? "Default restored." : "Reset failed.";
+  if (res.ok) { await loadSettings(); setTimeout(()=>{ $("tplMsg").textContent=""; }, 3500); }
 };
 
 window.preview = async function(){
@@ -846,10 +889,11 @@ window.preview = async function(){
     <p style="margin:14px 0 8px">${out.matched
       ? `<span class="pill ok">${esc(out.customer)}</span> <span class="pill">${esc(out.language)}</span>
          ${out.arabic_variant && out.arabic_variant!=="default" ? `<span class="pill gold">${esc(out.arabic_variant)}</span>`:""}`
-      : `<span class="pill bad">no match</span>`}</p>
+      : `<span class="pill bad">no match</span>`}
+      <span class="pill">${esc(out.voice_style)}</span></p>
     <label>Accept payload</label>
     <pre>${esc(JSON.stringify(out.accept_body.audio, null, 2))}</pre>
-    <label>Instructions (${out.instructions.length} chars)</label>
+    <label>Final system prompt (${out.instructions.length} chars)</label>
     <pre>${esc(out.instructions)}</pre>`;
   reveal("#previewOut", { opacity:[0,1] }, { duration:.3 });
 };

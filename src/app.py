@@ -60,11 +60,6 @@ API_BASE = ENDPOINT + "/openai/v1"
 WS_BASE = API_BASE.replace("https://", "wss://", 1)
 AUTH_HEADER = {"api-key": API_KEY}
 
-DEFAULT_INSTRUCTIONS = (
-    "You are the virtual assistant for {bank}. You are speaking with a customer "
-    "on the telephone."
-)
-
 # api_key is required by the constructor but never sent anywhere: this client
 # only verifies webhook signatures.
 verifier = OpenAI(
@@ -83,11 +78,10 @@ def agent_settings():
     """Runtime configuration: database overrides .env, .env overrides defaults."""
     stored = db.get_settings()
     values = settings_spec.resolve(stored)
-    values["instructions"] = (
-        stored.get("agent_instructions")
-        or os.environ.get("AGENT_INSTRUCTIONS")
-        or DEFAULT_INSTRUCTIONS.format(bank=values["bank_name_en"])
-    )
+    # The whole system prompt, placeholders and all. Seeded from
+    # prompts/system_template.txt on first run and editable in the console; the
+    # file is the fallback if the row was somehow emptied.
+    values["template"] = stored.get(db.TEMPLATE_KEY) or db.default_template()
     # Environment can still seed the transcription model on a fresh database.
     if not stored.get("transcription_model") and TRANSCRIPTION_MODEL_ENV:
         values["transcription_model"] = TRANSCRIPTION_MODEL_ENV
@@ -111,16 +105,19 @@ def build_accept_body(customer):
     that stripped the dialect and profile from the agent's first sentence.
     """
     values = agent_settings()
-    language = (customer or {}).get("preferred_language", "en")
+    # None rather than "en" when nobody matched, so the caller-transcription
+    # hint is omitted instead of guessing a language for an unknown caller.
+    language = (customer or {}).get("preferred_language")
 
     body = {
         "type": "realtime",
         "instructions": context.build_instructions(
-            values["instructions"],
+            values["template"],
             customer,
             dialect_prompts(),
             bank_en=values["bank_name_en"],
             bank_ar=values["bank_name_ar"],
+            voice_style=values["voice_style"],
         ),
         # Azure expects the deployment name here, not the underlying model name.
         "model": DEPLOYMENT,
@@ -344,8 +341,6 @@ def webhook():
         db.end_call(call_id, status="failed")
         return jsonify({"error": "accept failed", "status": accepted.status_code}), 502
 
-    settings = agent_settings()
-
     threading.Thread(
         target=lambda: asyncio.run(websocket_task(call_id)),
         name=f"ws-{call_id}",
@@ -407,12 +402,37 @@ def api_transcript(call_id):
 
 @app.route("/api/settings", methods=["GET", "PUT"])
 def api_settings():
+    warnings = []
+
     if request.method == "PUT":
         data = request.get_json(silent=True) or {}
         updates = {}
 
-        if "instructions" in data:
-            updates["agent_instructions"] = data.get("instructions") or ""
+        if "template" in data:
+            template = data.get("template") or ""
+            unknown = context.unknown_placeholders(template)
+            if unknown:
+                # Rejected rather than silently left in place: a misspelt
+                # placeholder would be read out to the caller verbatim.
+                return (
+                    jsonify(
+                        {
+                            "error": "unknown placeholders: "
+                            + ", ".join("{" + name + "}" for name in unknown),
+                            "unknown": unknown,
+                            "allowed": list(context.PLACEHOLDERS),
+                        }
+                    ),
+                    400,
+                )
+            # Dropping one of these is a legitimate (if odd) choice, so it is a
+            # warning rather than a refusal.
+            warnings = [
+                "{" + name + "} is missing — the agent will lose that section."
+                for name in context.missing_placeholders(template)
+            ]
+            updates[db.TEMPLATE_KEY] = template
+
         for variant, key in (("faseeh", "prompt_faseeh"), ("qatari", "prompt_qatari")):
             if variant in (data.get("prompts") or {}):
                 updates[key] = data["prompts"][variant] or ""
@@ -427,7 +447,11 @@ def api_settings():
     values = agent_settings()
     return jsonify(
         {
-            "instructions": values["instructions"],
+            "template": values["template"],
+            "default_template": db.default_template(),
+            "placeholders": context.PLACEHOLDERS,
+            "required_placeholders": list(context.REQUIRED_PLACEHOLDERS),
+            "warnings": warnings,
             "settings": settings_spec.describe(values),
             "prompts": dialect_prompts(),
             "deployment": DEPLOYMENT,
@@ -435,6 +459,12 @@ def api_settings():
             "arabic_variants": context.ARABIC_VARIANTS,
         }
     )
+
+
+@app.route("/api/settings/reset-template", methods=["POST"])
+def api_reset_template():
+    """Puts the shipped prompt template back, discarding console edits."""
+    return jsonify({"template": db.reset_template()})
 
 
 @app.route("/api/preview", methods=["GET"])
@@ -451,6 +481,7 @@ def api_preview():
             "customer": customer["full_name_en"] if customer else None,
             "language": language,
             "arabic_variant": (customer or {}).get("arabic_variant", "default"),
+            "voice_style": values["voice_style"],
             "instructions": build_accept_body(customer)["instructions"],
             "opening": context.opening_directive(
                 customer, values["bank_name_en"], values["bank_name_ar"]
@@ -486,7 +517,7 @@ if __name__ == "__main__":
     logger.info(f"Database:      {db.DB_PATH}")
     logger.info(
         f"Voices:        en={values['voice_en']} ar={values['voice_ar']} "
-        f"speed={values['speed']}"
+        f"speed={values['speed']} style={values['voice_style']}"
     )
     logger.info(
         f"Transcription: {values['transcription_model'] or 'disabled (assistant side only)'}"

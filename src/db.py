@@ -136,6 +136,7 @@ def init_db():
         conn.executescript(SCHEMA)
     _migrate()
     seed_prompts()
+    seed_template()
 
 
 def _migrate():
@@ -158,6 +159,10 @@ PROMPT_FILES = {
     "prompt_qatari": "qatari_dialect.txt",
 }
 
+# The whole system prompt, with `{placeholders}` for the per-caller sections.
+TEMPLATE_FILE = "system_template.txt"
+TEMPLATE_KEY = "prompt_template"
+
 
 def seed_prompts(force=False):
     """Loads the dialect prompt files into settings if they are not there yet."""
@@ -172,6 +177,46 @@ def seed_prompts(force=False):
             # A missing prompt file must not stop the app from starting; the
             # dialect simply falls back to the model's default Arabic.
             pass
+
+
+def default_template():
+    """The prompt template as shipped, straight from the file."""
+    try:
+        with open(os.path.join(PROMPTS_DIR, TEMPLATE_FILE), encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def seed_template():
+    """Puts the shipped template into settings the first time only.
+
+    A database created before the template existed may hold customised base
+    instructions, either in `agent_instructions` or in AGENT_INSTRUCTIONS.
+    Those replace the template's opening role sentence rather than being
+    thrown away, so an upgrade never silently loses the operator's wording.
+    """
+    if get_setting(TEMPLATE_KEY):
+        return
+
+    template = default_template()
+    if not template:
+        return
+
+    legacy = (get_setting("agent_instructions") or os.environ.get("AGENT_INSTRUCTIONS") or "").strip()
+    if legacy:
+        _role, separator, rest = template.partition("\n\n")
+        template = legacy + separator + rest if separator else legacy
+
+    set_settings({TEMPLATE_KEY: template})
+
+
+def reset_template():
+    """Restores the shipped template, discarding console edits."""
+    template = default_template()
+    if template:
+        set_settings({TEMPLATE_KEY: template})
+    return template
 
 
 # ---------------------------------------------------------------------------

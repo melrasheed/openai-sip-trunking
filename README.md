@@ -136,7 +136,7 @@ Then open **<http://127.0.0.1:8000/>** for the console.
 | `DATABASE_PATH` | – | Defaults to `./data/bank.db` |
 | `DEMO_CUSTOMER_MSISDN` | – | Your own number, written over the first seed record |
 | `LOG_LEVEL` | – | `INFO` or `DEBUG` |
-| `AGENT_INSTRUCTIONS` | – | Default agent role; the console overrides it and persists to the database |
+| `AGENT_INSTRUCTIONS` | – | Seeds the role sentence of the prompt template on a fresh database; the console owns it afterwards |
 
 The server fails fast at startup and names any missing required variable.
 
@@ -160,12 +160,13 @@ and service. Arabic names render right-to-left, and an **Arabic style** selector
 preferred language is Arabic. "Reseed" restores the eight sample customers.
 
 **Calls** — every call, with the number it came from, which customer it matched, and the outcome.
-Selecting a call shows the transcript as a conversation; a call in progress updates live, and an
-indicator shows whether caller transcription is arriving.
+The table refreshes itself every few seconds (and pauses while the tab is hidden), so there is
+nothing to press. Selecting a call shows the transcript as a conversation; a call in progress
+updates live, and an indicator shows whether caller transcription is arriving.
 
-**Agent settings** — instructions, greeting, the basic and advanced realtime settings, and the
-editable Arabic style prompts. The preview panel renders the exact instructions and audio payload
-that any number would produce, without placing a call.
+**Agent settings** — the basic and advanced realtime settings, the delivery style, the full
+editable system prompt, and the Arabic style prompts. The preview panel renders the exact
+instructions and audio payload that any number would produce, without placing a call.
 
 Each view is deep-linkable: `?view=customers`, `?view=calls`, `?view=settings`.
 
@@ -283,6 +284,7 @@ src/
   context.py            SIP header parsing, number matching, profile and dialect assembly
   settings_spec.py      Realtime settings: defaults, ranges, accept-payload construction
   prompts/
+    system_template.txt The whole system prompt, with {placeholders} for the per-caller sections
     faseeh_arabic.txt   Modern Standard Arabic style prompt
     qatari_dialect.txt  Doha dialect style prompt
   templates/
@@ -326,9 +328,27 @@ values that differ from the service default are sent, keeping the accept payload
 | Bank name · Arabic | `البنك التجاري` | How the agent refers to the bank when speaking Arabic |
 | Voice · English caller | `marin` | Voice used when the caller's preferred language is English |
 | Voice · Arabic caller | `cedar` | Voice used when the caller's preferred language is Arabic |
+| Delivery style | `Professional` | How the agent should sound. Folded into the system prompt as `{style}` |
 | Playback speed | `1.0` | Speed of the agent's speech. Range `0.25`–`1.5` |
 | Transcription model | `whisper` | Transcribes the caller. Empty disables caller transcription |
-| Transcription language hint | *(empty)* | ISO-639-1 code such as `ar`. Improves accuracy and latency |
+
+There is no transcription language setting: the hint follows the caller. A matched customer's
+preferred language is sent as `audio.input.transcription.language` (`ar` or `en`), and an
+unrecognised caller is left to the service's own detection rather than being guessed at.
+
+#### Delivery styles
+
+| Style | Effect |
+| --- | --- |
+| **Professional** | Polished, composed and efficient; courteous and businesslike |
+| **Friendly** | Warm and conversational, like a helpful colleague |
+| **Empathetic** | Patient and reassuring; acknowledges feelings first. Suits complaints |
+| **Energetic** | Upbeat and enthusiastic, with lively pacing |
+| **Concise** | The fewest words that answer the question |
+| **Formal** | Reserved and highly deferential; no colloquialisms or contractions |
+
+The style applies to both languages. An Arabic style set on a customer's profile still has the
+final word on register, because the template places `{dialect}` after `{style}`.
 
 ### Advanced
 
@@ -352,6 +372,56 @@ Shapes and ranges above were verified against the live service. Worth knowing if
 
 ---
 
+## The final system prompt
+
+There is no hidden preamble. **Agent settings → Final system prompt** (collapsed, because it is
+advanced) holds the *entire* string sent as `instructions` when a call is accepted, and it is
+editable. The per-caller parts are placeholders, filled in at accept time:
+
+| Placeholder | Filled with |
+| --- | --- |
+| `{bank}` | The bank's name, in the language the caller will be spoken to |
+| `{profile}` | The caller's profile, or a note that their number matched no record |
+| `{language}` | Which language to hold the conversation in |
+| `{style}` | The delivery style chosen above |
+| `{dialect}` | The Arabic style set on the caller's profile. Empty for English callers |
+| `{opening}` | How to open the call, including how to greet the caller by name |
+
+Everything around them — the role sentence, the accuracy rules and the guardrails — is ordinary
+text you can rewrite. The shipped default lives in `src/prompts/system_template.txt`; it is copied
+into the database on first run, and **Reset to default** copies it back.
+
+Two behaviours protect you from a broken prompt:
+
+- A placeholder that does not exist (`{custmer}`) is **rejected** with a 400 — an unfilled
+  placeholder would otherwise be read out to the caller verbatim.
+- Dropping `{profile}` or `{opening}` is allowed but **warned about**, since the agent then loses
+  the caller's context or never opens the call.
+
+Substitution is a plain scan for known names, not `str.format`, so a stray `{` typed into the
+template — or present in an Arabic prompt — can never raise while a call is waiting to be accepted.
+Sections that come out empty (the dialect, for an English caller) leave no blank gap behind.
+
+> **Prompt drift.** Once the template is in your database, later improvements to the shipped
+> default will not reach it. Press **Reset to default** after an upgrade if you have not customised
+> it. Upgrading from a version that had a **Base instructions** box is handled: that text becomes
+> the template's role sentence, so nothing you wrote is lost.
+
+### Guardrails
+
+The default template restricts the agent to one subject — the customer's own banking with this
+bank: accounts, balances, cards, transactions, transfers, loans, branches, KYC and service cases —
+and tells it to **apologise briefly and steer back** whenever the caller goes elsewhere: politics,
+religion, sport, news, medical, legal or tax matters, other companies, its own nature as an AI, or
+general chit-chat. It gives no opinion or partial answer first, apologises if it notices it has
+already strayed, refuses financial, investment, legal and tax advice in favour of a specialist, and
+ignores attempts to change its role or have it read its instructions out. It apologises once,
+warmly and briefly — never lecturing, never repeating the refusal.
+
+Because all of that is in the template, it is yours to tighten or relax per deployment.
+
+---
+
 ## Arabic styles
 
 A customer whose preferred language is Arabic can be given a delivery style, chosen on their
@@ -364,9 +434,10 @@ profile:
 | **Qatari** | Enforces the Doha dialect — qaf rules, gender-aware address forms (چ / ك), mandatory substitutions |
 
 The prompt behind each style is seeded into the database from `src/prompts/` and is editable in
-**Agent settings → Arabic styles**, so the wording can be tuned without touching code. The selected
-style is appended to the instructions after the customer profile, so the agent knows who it is
-speaking to *and* how it should sound.
+**Agent settings → Arabic styles** (collapsed by default — it is advanced configuration), so the
+wording can be tuned without touching code. The selected style is substituted into the template
+after the customer profile and after the delivery style, so the agent knows who it is speaking to,
+*and* the dialect's register rules are the last word on how it sounds.
 
 > **Upgrading an existing database:** the `arabic_variant` column is added in place, and every
 > existing customer keeps the **Model default** style — an upgrade will not silently rewrite records
@@ -442,7 +513,9 @@ If `.failed` says the model cannot be resolved, change **Transcription model** i
 | Calls never reach the webhook | Confirm the SIP URI host is `<region>.sip.ai.azure.com`, that `transport=tls` is present, and that the project ID is `proj_<32-hex>`. Check the registered URL with `webhook_endpoints.py list`. |
 | Caller hears nothing, call drops after ~10 s | Media, not signalling. TLS signalling requires SRTP media — enable secure media on the Vonage trunk. |
 | Caller is never recognised | Check the log line `incoming from <number>`. If the number differs from the stored one, edit the customer in the console — matching tolerates formatting but not a genuinely different number. |
-| The agent invents account details | The guardrails tell it to use only the profile. Tighten the base instructions in **Agent settings**, which apply from the next call. |
+| The agent invents account details | The guardrails tell it to use only the profile. Tighten them in **Agent settings → Final system prompt**, which applies from the next call. |
+| The agent chats about anything asked | The scope rules live in the template. Check they are still there — **Reset to default** restores them — and remember an edit applies from the next call, not the one in progress. |
+| The first sentence ignores the Arabic style | Something is sending `instructions` on `response.create`; that replaces the session instructions for that one response. The opening belongs in the template's `{opening}`. |
 | Tunnel worked yesterday, not today | Dev tunnels expire (30 days maximum). Recreate it and re-register the webhook URL. |
 
 ---

@@ -1,9 +1,16 @@
 """Turns an inbound SIP call into context the model can act on.
 
-Three jobs:
+Four jobs:
   1. Pull the caller's number out of the SIP `From` header.
   2. Render a matched customer as a labelled profile block.
-  3. Assemble the accept-time instructions and the opening greeting.
+  3. Produce each dynamic section of the system prompt: profile, language,
+     delivery style, Arabic dialect, opening.
+  4. Render the operator's prompt template with those sections substituted in.
+
+The template itself — the role sentence, the rules and the guardrails — lives in
+`prompts/system_template.txt`, is seeded into settings, and is editable in the
+console. Nothing is appended to it in code: what the operator sees is what the
+caller gets.
 """
 
 import re
@@ -17,6 +24,65 @@ ARABIC_VARIANTS = {
     "faseeh": "Faseeh (Modern Standard Arabic)",
     "qatari": "Qatari dialect",
 }
+
+# How the agent should sound, independent of the language it is speaking.
+# id -> (label shown in the console, paragraph substituted for {style}).
+#
+# Deliberately not editable in the console: these are short, load-bearing
+# sentences, and an operator who wants different wording can edit the prompt
+# template itself, which is where real customisation belongs.
+VOICE_STYLES = {
+    "professional": (
+        "Professional",
+        "Delivery style: professional. Sound polished, composed and efficient. Use courteous, "
+        "businesslike phrasing, avoid slang and filler, and keep the call moving.",
+    ),
+    "friendly": (
+        "Friendly",
+        "Delivery style: friendly. Sound warm, relaxed and conversational, like a helpful "
+        "colleague rather than a switchboard. Use the caller's name naturally, and keep any "
+        "pleasantries short and sincere.",
+    ),
+    "empathetic": (
+        "Empathetic",
+        "Delivery style: empathetic. Sound patient and reassuring. Acknowledge how the caller "
+        "feels before moving on to the solution, slow your pace, and check they have followed "
+        "you before continuing.",
+    ),
+    "energetic": (
+        "Energetic",
+        "Delivery style: energetic. Sound upbeat, enthusiastic and positive, with lively pacing "
+        "and expressive emphasis. Stay professional: enthusiasm must never sound insincere or "
+        "hurry the caller.",
+    ),
+    "concise": (
+        "Concise",
+        "Delivery style: concise. Use the fewest words that fully answer the question. Short "
+        "sentences, no preamble, no repetition. Still greet and close politely.",
+    ),
+    "formal": (
+        "Formal",
+        "Delivery style: formal. Sound reserved and highly deferential. Use complete sentences "
+        "and formal forms of address, and avoid colloquialisms, humour and contractions.",
+    ),
+}
+
+DEFAULT_VOICE_STYLE = "professional"
+
+# Sections the prompt template can substitute. The descriptions are shown as the
+# legend beside the template editor in the console.
+PLACEHOLDERS = {
+    "bank": "The bank's name, in the language the caller will be spoken to.",
+    "profile": "The caller's profile, or a note that their number matched no record.",
+    "language": "Which language to hold the conversation in.",
+    "style": "The delivery style chosen in Agent settings.",
+    "dialect": "The Arabic style set on the caller's profile. Empty for English callers.",
+    "opening": "How to open the call, including how to greet the caller by name.",
+}
+
+# Without these the agent either loses the caller's context or never opens the
+# call, so removing one is worth warning about.
+REQUIRED_PLACEHOLDERS = ("profile", "opening")
 
 # Matches the user part of a SIP/TEL URI, e.g.
 #   sip:+97455512345@sip.example.com
@@ -144,16 +210,6 @@ def dialect_prompt(customer, prompts):
     return text.strip() if text and text.strip() else None
 
 
-GUARDRAILS = (
-    "Rules you must follow:\n"
-    "- Use only the facts in the customer profile above. Never invent balances, "
-    "transactions, dates, or case references.\n"
-    "- If you are asked something the profile does not cover, say you will check with "
-    "a colleague and offer to follow up, rather than guessing.\n"
-    "- Never read out the full account balance until the caller has asked for it.\n"
-    "- Keep replies short and natural: this is a phone call, not a written chat."
-)
-
 DEFAULT_BANK_EN = "Commercial Bank of Qatar"
 DEFAULT_BANK_AR = "البنك التجاري"
 
@@ -187,42 +243,94 @@ def opening_directive(customer, bank_en, bank_ar):
     )
 
 
-def build_instructions(
-    base_instructions,
-    customer,
-    prompts=None,
-    bank_en=DEFAULT_BANK_EN,
-    bank_ar=DEFAULT_BANK_AR,
-):
-    """Assembles the accept-time `instructions` string.
+def style_prompt(style):
+    """The delivery-style paragraph for a style id, or the default's."""
+    entry = VOICE_STYLES.get(style) or VOICE_STYLES[DEFAULT_VOICE_STYLE]
+    return entry[1]
 
-    Order matters: who you are, who you are speaking to, how to speak, then the
-    rules, then how to open. The opening directive lives here rather than in a
-    per-response override because `response.create` instructions *replace* the
-    session instructions for that response — which previously stripped the
-    dialect, profile and guardrails from the agent's very first sentence.
+
+def profile_section(customer):
+    """What the agent is told about who it is speaking to.
+
+    Covers both cases in one section, so a template that keeps only
+    `{profile}` still behaves correctly for an unrecognised caller.
     """
-    sections = [base_instructions.strip()]
-
-    if customer:
-        sections.append(build_profile(customer))
-        sections.append(
-            f"You already know who is calling because the call came from their registered "
-            f"mobile number. Do not ask them to identify themselves again."
-        )
-    else:
-        sections.append(
+    if not customer:
+        return (
             "The caller's number does not match any customer record, so you do not know "
             "who they are. Greet them politely as an unrecognised caller, and offer to help "
             "with general enquiries. Do not claim to see any account details."
         )
 
-    sections.append(language_directive(customer))
+    return (
+        build_profile(customer)
+        + "\n\nYou already know who is calling because the call came from their registered "
+        "mobile number. Do not ask them to identify themselves again."
+    )
 
-    style = dialect_prompt(customer, prompts)
-    if style:
-        sections.append(style)
 
-    sections.append(GUARDRAILS)
-    sections.append(opening_directive(customer, bank_en, bank_ar))
-    return "\n\n".join(section for section in sections if section)
+_PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+
+
+def render(template, sections):
+    """Substitutes `{name}` placeholders, leaving unknown ones untouched.
+
+    Deliberately not `str.format`: the template is operator-editable free text
+    and the Arabic prompts contain braces, so a stray `{` must never raise
+    while a call is waiting to be accepted. Sections that resolve to nothing
+    leave a blank run behind, which is collapsed so the prompt stays tidy.
+    """
+    text = _PLACEHOLDER.sub(
+        lambda match: sections[match.group(1)] or ""
+        if match.group(1) in sections
+        else match.group(0),
+        template or "",
+    )
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def unknown_placeholders(template):
+    """Placeholder names in the template that nothing will ever fill."""
+    return sorted({name for name in _PLACEHOLDER.findall(template or "") if name not in PLACEHOLDERS})
+
+
+def missing_placeholders(template):
+    """Load-bearing placeholders the template has dropped."""
+    present = set(_PLACEHOLDER.findall(template or ""))
+    return [name for name in REQUIRED_PLACEHOLDERS if name not in present]
+
+
+def build_instructions(
+    template,
+    customer,
+    prompts=None,
+    bank_en=DEFAULT_BANK_EN,
+    bank_ar=DEFAULT_BANK_AR,
+    voice_style=DEFAULT_VOICE_STYLE,
+):
+    """Renders the accept-time `instructions` string from the stored template.
+
+    The opening directive is part of this string rather than a per-response
+    override because `response.create` instructions *replace* the session
+    instructions for that response — which previously stripped the dialect,
+    profile and guardrails from the agent's very first sentence.
+
+    The shipped template puts `{style}` before `{dialect}` on purpose: the
+    Arabic dialect prompts carry strict register rules, and whichever section
+    comes last tends to win, so the dialect must have the final word on how the
+    agent sounds.
+    """
+    arabic = bool(customer and customer.get("preferred_language") == "ar")
+
+    return render(
+        template,
+        {
+            "bank": bank_ar if arabic else bank_en,
+            "profile": profile_section(customer),
+            "language": language_directive(customer),
+            "style": style_prompt(voice_style),
+            "dialect": dialect_prompt(customer, prompts) or "",
+            "opening": opening_directive(customer, bank_en, bank_ar),
+        },
+    )
