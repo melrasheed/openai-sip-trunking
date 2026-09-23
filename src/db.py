@@ -6,6 +6,7 @@ transcript of each call, and the runtime-editable agent settings.
 All data here is fictional demo data.
 """
 
+import hashlib
 import os
 import sqlite3
 import threading
@@ -137,6 +138,7 @@ def init_db():
     _migrate()
     seed_prompts()
     seed_template()
+    upgrade_template()
 
 
 def _migrate():
@@ -162,6 +164,22 @@ PROMPT_FILES = {
 # The whole system prompt, with `{placeholders}` for the per-caller sections.
 TEMPLATE_FILE = "system_template.txt"
 TEMPLATE_KEY = "prompt_template"
+
+# Fingerprint of the shipped template that was seeded, so a later upgrade can
+# tell an untouched template from an operator-edited one.
+TEMPLATE_ORIGIN_KEY = "prompt_template_origin"
+
+# Fingerprints of templates shipped by earlier versions. A database seeded
+# before TEMPLATE_ORIGIN_KEY existed still upgrades cleanly if its stored
+# template matches one of these, and is left alone if it does not.
+TEMPLATE_HISTORY = (
+    # pre-knowledge-base template
+    "b2388ea8610185b7ddf11a56f63e4a790aef91cdf2a3f815cb3f29278597aaaf",
+)
+
+
+def template_fingerprint(template):
+    return hashlib.sha256((template or "").strip().encode("utf-8")).hexdigest()
 
 
 def seed_prompts(force=False):
@@ -206,16 +224,53 @@ def seed_template():
     legacy = (get_setting("agent_instructions") or os.environ.get("AGENT_INSTRUCTIONS") or "").strip()
     if legacy:
         _role, separator, rest = template.partition("\n\n")
-        template = legacy + separator + rest if separator else legacy
+        # Deliberately no origin fingerprint: this template is no longer the
+        # shipped one, so a later upgrade must leave it alone.
+        set_settings({TEMPLATE_KEY: legacy + separator + rest if separator else legacy})
+        return
 
-    set_settings({TEMPLATE_KEY: template})
+    set_settings({TEMPLATE_KEY: template, TEMPLATE_ORIGIN_KEY: template_fingerprint(template)})
+
+
+def upgrade_template():
+    """Moves an untouched stored template on to the current shipped default.
+
+    Only a template that still matches the default it was seeded from — or one
+    shipped by an earlier version — is replaced, so an operator's edits are
+    never overwritten. Editing the prompt in the console opts that database out
+    of upgrades permanently; the reset button is then the way back.
+    """
+    stored = get_setting(TEMPLATE_KEY)
+    template = default_template()
+    if not stored or not template:
+        return False
+
+    shipped = template_fingerprint(template)
+    current = template_fingerprint(stored)
+
+    if current == shipped:
+        # Already up to date. Record where it came from so the next upgrade
+        # does not have to fall back to the history list.
+        if get_setting(TEMPLATE_ORIGIN_KEY) != shipped:
+            set_settings({TEMPLATE_ORIGIN_KEY: shipped})
+        return False
+
+    origin = get_setting(TEMPLATE_ORIGIN_KEY)
+    untouched = current == origin if origin else current in TEMPLATE_HISTORY
+    if not untouched:
+        return False
+
+    set_settings({TEMPLATE_KEY: template, TEMPLATE_ORIGIN_KEY: shipped})
+    return True
 
 
 def reset_template():
     """Restores the shipped template, discarding console edits."""
     template = default_template()
     if template:
-        set_settings({TEMPLATE_KEY: template})
+        set_settings(
+            {TEMPLATE_KEY: template, TEMPLATE_ORIGIN_KEY: template_fingerprint(template)}
+        )
     return template
 
 

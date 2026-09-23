@@ -17,6 +17,53 @@ import re
 
 LANGUAGE_NAMES = {"ar": "Arabic", "en": "English"}
 
+# Currency codes the demo can realistically carry, as singular/plural names.
+# The model reads a bare three-letter code as an initialism — "Q A R" — so the
+# code is expanded to a spoken name before it ever reaches the prompt.
+# Anything not listed is left untouched rather than guessed at.
+CURRENCY_NAMES = {
+    "QAR": ("Qatari riyal", "Qatari riyals"),
+    "USD": ("US dollar", "US dollars"),
+    "EUR": ("euro", "euros"),
+    "GBP": ("British pound", "British pounds"),
+    "AED": ("UAE dirham", "UAE dirhams"),
+    "SAR": ("Saudi riyal", "Saudi riyals"),
+}
+
+# "QAR 62,000" and the bare code on its own. The amount form is substituted
+# first so the name lands *after* the number, the way it is spoken.
+_CURRENCY_AMOUNT = re.compile(
+    r"\b(" + "|".join(CURRENCY_NAMES) + r")\s+(\d[\d,]*(?:\.\d+)?)\b"
+)
+_CURRENCY_BARE = re.compile(r"\b(" + "|".join(CURRENCY_NAMES) + r")\b")
+
+
+def expand_currency_codes(text):
+    """Replaces currency codes with names the model will say out loud.
+
+    Applied to the whole profile block rather than only the formatted amounts,
+    because the seeded free-text fields embed the code too — "Auto loan, QAR
+    62,000 outstanding". Word boundaries keep it off reference numbers.
+    """
+    if not text:
+        return text
+
+    text = _CURRENCY_AMOUNT.sub(
+        lambda m: f"{m.group(2)} {CURRENCY_NAMES[m.group(1)][1]}", text
+    )
+    return _CURRENCY_BARE.sub(lambda m: CURRENCY_NAMES[m.group(1)][1], text)
+
+
+# Said out loud, so it also covers currencies arriving from the knowledge base,
+# which never pass through expand_currency_codes().
+PRONUNCIATION_DIRECTIVE = (
+    "Pronunciation: say currency names in full, never as letters. Read \"QAR\" as "
+    "\"Qatari riyals\" in English and \"ريال قطري\" in Arabic, and treat any other "
+    "three-letter currency code the same way — \"USD\" is \"US dollars\". Never spell "
+    "a currency code out letter by letter."
+)
+
+
 # Arabic delivery styles. The prompt text for the non-default variants lives in
 # settings so it can be edited in the console.
 ARABIC_VARIANTS = {
@@ -77,6 +124,8 @@ PLACEHOLDERS = {
     "language": "Which language to hold the conversation in.",
     "style": "The delivery style chosen in Agent settings.",
     "dialect": "The Arabic style set on the caller's profile. Empty for English callers.",
+    "knowledge": "When to consult the knowledge base. Empty when none is configured.",
+    "pronunciation": "How to say currency codes out loud, so \"QAR\" is not spelled out.",
     "opening": "How to open the call, including how to greet the caller by name.",
 }
 
@@ -123,9 +172,21 @@ def caller_number(sip_headers):
 
 
 def _money(amount, currency):
+    """Formats an amount the way it should be spoken, not written.
+
+    "QAR 4,820.00" is read back as "Q A R"; "4,820.00 Qatari riyals" is not.
+    Unknown codes keep the written form rather than being mangled.
+    """
     if amount is None:
         return None
-    return f"{currency or ''} {amount:,.2f}".strip()
+
+    figure = f"{amount:,.2f}"
+    names = CURRENCY_NAMES.get((currency or "").strip().upper())
+    if not names:
+        return f"{currency or ''} {figure}".strip()
+
+    singular, plural = names
+    return f"{figure} {singular if abs(amount) == 1 else plural}"
 
 
 def build_profile(customer):
@@ -178,7 +239,10 @@ def build_profile(customer):
     add("Loan", customer.get("loan_summary"))
     add("Relationship manager", customer.get("relationship_manager"))
 
-    return "\n".join(lines)
+    # Catches the codes embedded in free-text fields, which never went through
+    # _money(). Amounts formatted above are already expanded, so this is a
+    # no-op for them.
+    return expand_currency_codes("\n".join(lines))
 
 
 def language_directive(customer):
@@ -241,6 +305,35 @@ def opening_directive(customer, bank_en, bank_ar):
         f"{bank}, then ask how you can help. Keep it to one short, natural sentence, and follow "
         f"the language and style rules above."
     )
+
+
+def build_hold_instruction(customer, prompts=None, nth=1):
+    """A one-line brief for a holding phrase while a lookup is running.
+
+    Sent as per-response `instructions`, which *replace* the session
+    instructions for that response — so the language and dialect rules have to
+    be repeated here or an Arabic caller is answered in English.
+
+    `nth` is which holding phrase this is in the current wait, so the second
+    one can be told not to echo the first.
+    """
+    parts = [language_directive(customer)]
+
+    dialect = dialect_prompt(customer, prompts)
+    if dialect:
+        parts.append(dialect)
+
+    brief = (
+        "You are still waiting for a knowledge base lookup to come back. Say one short, "
+        "natural sentence to let the caller know you are still looking, so the line is not "
+        "silent. Do not attempt to answer the question, do not ask a new question, and do "
+        "not invent any facts. Keep it under about eight words."
+    )
+    if nth > 1:
+        brief += " You have already said you are checking, so word this differently."
+
+    parts.append(brief)
+    return "\n\n".join(parts)
 
 
 def style_prompt(style):
@@ -308,6 +401,7 @@ def build_instructions(
     bank_en=DEFAULT_BANK_EN,
     bank_ar=DEFAULT_BANK_AR,
     voice_style=DEFAULT_VOICE_STYLE,
+    knowledge_directive="",
 ):
     """Renders the accept-time `instructions` string from the stored template.
 
@@ -322,8 +416,9 @@ def build_instructions(
     agent sounds.
     """
     arabic = bool(customer and customer.get("preferred_language") == "ar")
+    directive = (knowledge_directive or "").strip()
 
-    return render(
+    instructions = render(
         template,
         {
             "bank": bank_ar if arabic else bank_en,
@@ -331,6 +426,25 @@ def build_instructions(
             "language": language_directive(customer),
             "style": style_prompt(voice_style),
             "dialect": dialect_prompt(customer, prompts) or "",
+            "knowledge": directive,
+            "pronunciation": PRONUNCIATION_DIRECTIVE,
             "opening": opening_directive(customer, bank_en, bank_ar),
         },
     )
+
+    # A template edited before these placeholders existed has nowhere to put
+    # them, and dropping them would leave the agent holding a search tool it
+    # was never told to use, or spelling currency codes out. Append instead of
+    # silently losing them; appending never disturbs an operator's own edits.
+    extras = [
+        text
+        for placeholder, text in (
+            ("{knowledge}", directive),
+            ("{pronunciation}", PRONUNCIATION_DIRECTIVE),
+        )
+        if text and placeholder not in (template or "")
+    ]
+    if extras:
+        instructions = instructions.rstrip() + "\n\n" + "\n\n".join(extras)
+
+    return instructions

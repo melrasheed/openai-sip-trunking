@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 import threading
+import time
 
 import requests
 import websockets
@@ -34,6 +35,7 @@ from openai import InvalidWebhookSignatureError, OpenAI
 
 import context
 import db
+import knowledge
 import settings_spec
 
 # Flask buffers stdout when it is not a TTY, which would hide the event log.
@@ -96,6 +98,14 @@ def dialect_prompts():
     }
 
 
+def knowledge_directive(values=None):
+    """The prompt section naming the knowledge base, or "" when it is off."""
+    values = values if values is not None else agent_settings()
+    if not values.get("knowledge_enabled") or not knowledge.is_configured():
+        return ""
+    return knowledge.directive(values.get("knowledge_topic"))
+
+
 def build_accept_body(customer):
     """The accept payload, per the guide, with the caller's context folded in.
 
@@ -108,6 +118,7 @@ def build_accept_body(customer):
     # None rather than "en" when nobody matched, so the caller-transcription
     # hint is omitted instead of guessing a language for an unknown caller.
     language = (customer or {}).get("preferred_language")
+    directive = knowledge_directive(values)
 
     body = {
         "type": "realtime",
@@ -118,10 +129,17 @@ def build_accept_body(customer):
             bank_en=values["bank_name_en"],
             bank_ar=values["bank_name_ar"],
             voice_style=values["voice_style"],
+            knowledge_directive=directive,
         ),
         # Azure expects the deployment name here, not the underlying model name.
         "model": DEPLOYMENT,
     }
+
+    if directive:
+        # The knowledge base is a remote MCP server: the service calls it
+        # directly, so nothing here has to proxy the search.
+        body["tools"] = [knowledge.build_tool()]
+        body["tool_choice"] = "auto"
 
     audio = settings_spec.build_audio(values, language)
     if audio:
@@ -175,7 +193,218 @@ def _flush_delta(call_id, item_id):
     return False
 
 
+# ---------------------------------------------------------------------------
+# Knowledge base lookups
+# ---------------------------------------------------------------------------
+#
+# A remote MCP tool is run by the Realtime service, not by us, so there is no
+# result for us to hand back the way a local function tool would. The guide is
+# blunt about what that costs us:
+#
+#     "After the response is done and all of its MCP calls have finished, send
+#      another response.create event to let the model use the results and
+#      proceed with the conversation. The Realtime API doesn't create these
+#      follow-up responses automatically."
+#
+# Without that follow-up the agent says it will check, the search runs, and
+# the line goes quiet until the caller asks again. That is the bug.
+#
+# Two details shape the code below. First, response.done can arrive before the
+# search finishes, so this cannot be a sequence; it is a small state machine
+# that fires when both halves are true, in whichever order they land. Second,
+# a search can take ten to fifteen seconds, which is a long time to hold a
+# phone to your ear in silence, so the same state also schedules short holding
+# phrases while we wait.
+
+_MCP_SETTLED = ("completed", "failed", "incomplete")
+
+# How often the read loop wakes up with nothing to do. Holding phrases and the
+# search watchdog are driven by the clock, not by events, so they need a tick
+# even when the service has gone quiet.
+_TICK_SECONDS = 1.0
+
+_mcp_state = {}
+
+
+def _mcp(call_id):
+    """Per-call knowledge base state, created on first use."""
+    return _mcp_state.setdefault(
+        call_id,
+        {
+            "pending": set(),  # searches still running, by item id
+            "used": False,  # the response being generated called a tool
+            "armed": False,  # a finished response owes us a follow-up
+            "active": False,  # the agent is speaking
+            "caller": False,  # the caller is speaking
+            "started": None,  # when the current wait began
+            "next_hold": None,  # earliest the next holding phrase may go
+            "holds": 0,
+            "customer": None,
+            "prompts": {},
+            "hold_enabled": True,
+            "hold_delay": 5.0,
+            "hold_interval": 5.0,
+            "hold_max": 2,
+            "timeout": 30.0,
+        },
+    )
+
+
+def _mcp_init(call_id, customer=None):
+    """Loads the settings a call will need, once, at connect time."""
+    values = agent_settings()
+    state = _mcp(call_id)
+    state["customer"] = customer
+    state["prompts"] = dialect_prompts()
+    state["hold_enabled"] = bool(values.get("knowledge_hold_enabled", True))
+    state["hold_delay"] = max(0, int(values.get("knowledge_hold_delay_ms", 5000))) / 1000.0
+    state["hold_interval"] = max(1, int(values.get("knowledge_hold_interval_ms", 5000))) / 1000.0
+    state["hold_max"] = max(0, int(values.get("knowledge_hold_max", 2)))
+    state["timeout"] = max(1, int(values.get("knowledge_timeout_ms", 30000))) / 1000.0
+    return state
+
+
+def _mcp_begin(state, item_id):
+    """A search has started."""
+    if not item_id or item_id in state["pending"]:
+        return
+    first = not state["pending"]
+    state["pending"].add(item_id)
+    # Only a real tool call earns a follow-up. Holding phrases and follow-ups
+    # never set this, which is what stops them feeding each other.
+    state["used"] = True
+    if first:
+        state["started"] = time.monotonic()
+        state["holds"] = 0
+        state["next_hold"] = state["started"] + state["hold_delay"]
+
+
+def _mcp_end(state, item_id):
+    """A search has finished, one way or another."""
+    state["pending"].discard(item_id)
+    if not state["pending"]:
+        state["started"] = None
+        state["next_hold"] = None
+        state["holds"] = 0
+
+
+def _mcp_track(call_id, event):
+    """Folds one server event into the call's knowledge base state."""
+    state = _mcp(call_id)
+    event_type = event.get("type") or ""
+
+    if event_type == "response.created":
+        state["active"] = True
+        return
+
+    if event_type == "response.done":
+        state["active"] = False
+        if state["used"]:
+            state["used"] = False
+            state["armed"] = True
+        return
+
+    if event_type == "input_audio_buffer.speech_started":
+        state["caller"] = True
+        return
+
+    if event_type in ("input_audio_buffer.speech_stopped", "input_audio_buffer.committed"):
+        state["caller"] = False
+        return
+
+    if event_type == "response.mcp_call.in_progress" or event_type.startswith(
+        "response.mcp_call_arguments."
+    ):
+        _mcp_begin(state, event.get("item_id"))
+        return
+
+    if event_type.startswith("response.mcp_call."):
+        if event_type.rsplit(".", 1)[-1] in _MCP_SETTLED:
+            _mcp_end(state, event.get("item_id"))
+        return
+
+    # Some deployments only report the finished tool call as an output item.
+    if event_type == "response.output_item.done":
+        item = event.get("item") or {}
+        if item.get("type") == "mcp_call":
+            _mcp_end(state, item.get("id"))
+
+
+def _mcp_tick(call_id):
+    """Returns whatever the call is owed right now: a follow-up, or a hold."""
+    state = _mcp_state.get(call_id)
+    if not state:
+        return []
+
+    now = time.monotonic()
+    outbound = []
+
+    # A search that never reports back would hold the caller for ever. Give up
+    # on it and let the agent answer with what it already knows.
+    if state["pending"] and state["started"] is not None:
+        if now - state["started"] >= state["timeout"]:
+            logger.error(f"[{call_id}] knowledge base search timed out, answering without it")
+            db.add_transcript_line(call_id, "system", "Knowledge base search timed out")
+            state["pending"].clear()
+            state["used"] = False
+            state["armed"] = True
+            _mcp_end(state, None)
+
+    # Never talk over either party.
+    if state["active"] or state["caller"]:
+        return outbound
+
+    if state["armed"] and not state["pending"]:
+        state["armed"] = False
+        logger.info(f"[{call_id}] knowledge base ready, asking for the answer")
+        db.add_transcript_line(call_id, "system", "Delivering knowledge base answer")
+        # Deliberately bare: per-response instructions replace the session
+        # instructions wholesale, which would strip the caller's language,
+        # dialect and profile out of the one reply that most needs them.
+        outbound.append({"type": "response.create"})
+        return outbound
+
+    if (
+        state["pending"]
+        and state["hold_enabled"]
+        and state["next_hold"] is not None
+        and state["holds"] < state["hold_max"]
+        and now >= state["next_hold"]
+    ):
+        state["holds"] += 1
+        state["next_hold"] = now + state["hold_interval"]
+        logger.info(f"[{call_id}] search still running, holding phrase {state['holds']}")
+        db.add_transcript_line(
+            call_id, "system", f"Holding phrase {state['holds']} while the search runs"
+        )
+        outbound.append(
+            {
+                "type": "response.create",
+                "response": {
+                    "instructions": context.build_hold_instruction(
+                        state["customer"], state["prompts"], state["holds"]
+                    )
+                },
+            }
+        )
+
+    return outbound
+
+
 def _handle_event(call_id, event):
+    """Reacts to one server event and returns anything we owe the service back.
+
+    Returns a list of outbound events rather than sending them, because this
+    runs synchronously and has no socket of its own. The caller owns the
+    socket and does the sending, which also makes the knowledge base logic
+    testable without a live call.
+    """
+    _mcp_track(call_id, event)
+    _record_event(call_id, event)
+    return _mcp_tick(call_id)
+
+
+def _record_event(call_id, event):
     event_type = event.get("type") or ""
 
     if event_type == "response.output_audio_transcript.done":
@@ -216,6 +445,38 @@ def _handle_event(call_id, event):
         logger.error(f"[{call_id}] realtime error: {json.dumps(event)[:500]}")
         return
 
+    # Knowledge base lookups. The service talks to the MCP server itself, so
+    # these events are the only window onto whether a search happened.
+    if event_type.startswith("mcp_list_tools."):
+        stage = event_type.split(".", 1)[1]
+        if stage == "failed":
+            detail = (event.get("error") or {}).get("message") or json.dumps(event)[:300]
+            logger.error(f"[{call_id}] knowledge base unreachable: {detail}")
+            db.add_transcript_line(
+                call_id, "system", f"Knowledge base unavailable: {detail}"
+            )
+        elif stage == "completed":
+            logger.info(f"[{call_id}] knowledge base connected")
+        return
+
+    if event_type == "response.mcp_call_arguments.done":
+        query = event.get("arguments") or ""
+        logger.info(f"[{call_id}] knowledge base query: {query[:200]}")
+        db.add_transcript_line(call_id, "system", f"Knowledge base query: {query[:300]}")
+        return
+
+    if event_type.startswith("response.mcp_call."):
+        stage = event_type.split(".")[-1]
+        if stage == "failed":
+            detail = (event.get("error") or {}).get("message") or json.dumps(event)[:300]
+            logger.error(f"[{call_id}] knowledge base search FAILED: {detail}")
+            db.add_transcript_line(
+                call_id, "system", f"Knowledge base search failed: {detail}"
+            )
+        elif stage == "completed":
+            logger.info(f"[{call_id}] knowledge base search completed")
+        return
+
     # Structural fallback: any other transcription-flavoured event that carries
     # text still gets recorded, whatever the service decided to call it.
     if "transcription" in event_type and (event.get("transcript") or "").strip():
@@ -223,12 +484,18 @@ def _handle_event(call_id, event):
         logger.info(f"[{call_id}] caller transcript via {event_type}")
 
 
-async def websocket_task(call_id):
+async def websocket_task(call_id, customer=None):
     """Monitors the realtime session, opens the call, and logs the transcript."""
     url = WS_BASE + "/realtime?call_id=" + call_id
     try:
         async with websockets.connect(url, additional_headers=AUTH_HEADER) as websocket:
             logger.info(f"[{call_id}] websocket connected")
+            _mcp_init(call_id, customer)
+
+            async def send(events):
+                for outbound in events:
+                    await websocket.send(json.dumps(outbound))
+
             # No `instructions` here on purpose: they would override the session
             # instructions for this response, stripping the dialect, profile and
             # guardrails from the agent's opening line. The accept payload
@@ -236,7 +503,14 @@ async def websocket_task(call_id):
             await websocket.send(json.dumps({"type": "response.create"}))
 
             while True:
-                message = await websocket.recv()
+                try:
+                    message = await asyncio.wait_for(websocket.recv(), timeout=_TICK_SECONDS)
+                except asyncio.TimeoutError:
+                    # A quiet socket still needs servicing: holding phrases and
+                    # the search watchdog run off the clock, not off events.
+                    await send(_mcp_tick(call_id))
+                    continue
+
                 try:
                     event = json.loads(message)
                 except json.JSONDecodeError:
@@ -250,7 +524,7 @@ async def websocket_task(call_id):
                 elif event_type == "error" or not event_type.endswith(".delta"):
                     logger.info(f"[{call_id}] <- {event_type}")
 
-                _handle_event(call_id, event)
+                await send(_handle_event(call_id, event))
 
     except websockets.exceptions.ConnectionClosed as exc:
         logger.info(f"[{call_id}] websocket closed: code={exc.code} reason={exc.reason}")
@@ -260,6 +534,7 @@ async def websocket_task(call_id):
         for item_id in list(_delta_buffers.get(call_id, {})):
             _flush_delta(call_id, item_id)
         _delta_buffers.pop(call_id, None)
+        _mcp_state.pop(call_id, None)
         db.end_call(call_id)
 
 
@@ -322,15 +597,36 @@ def webhook():
     # so only their size is recorded here.
     logger.info(
         f"[{call_id}] accept config: audio={json.dumps(accept_body.get('audio', {}))} "
-        f"instructions={len(accept_body['instructions'])} chars"
+        f"instructions={len(accept_body['instructions'])} chars "
+        f"knowledge={'on' if accept_body.get('tools') else 'off'}"
     )
-    try:
-        accepted = requests.post(
+
+    def post_accept(body):
+        return requests.post(
             API_BASE + "/realtime/calls/" + call_id + "/accept",
             headers={**AUTH_HEADER, "Content-Type": "application/json"},
-            json=accept_body,
+            json=body,
             timeout=10,
         )
+
+    try:
+        accepted = post_accept(accept_body)
+        if not accepted.ok and accept_body.get("tools"):
+            # Never drop a call over the knowledge base. If this deployment
+            # rejects the MCP tool, answer without it and say so in the log.
+            logger.error(
+                f"[{call_id}] accept rejected with knowledge base "
+                f"({accepted.status_code} {accepted.text[:300]}); retrying without it"
+            )
+            retry = {k: v for k, v in accept_body.items() if k not in ("tools", "tool_choice")}
+            accepted = post_accept(retry)
+            if accepted.ok:
+                db.add_transcript_line(
+                    call_id,
+                    "system",
+                    "Knowledge base rejected by the realtime service; "
+                    "the call continues without it.",
+                )
     except requests.RequestException as exc:
         logger.error(f"[{call_id}] accept request failed: {exc}")
         db.end_call(call_id, status="failed")
@@ -342,7 +638,7 @@ def webhook():
         return jsonify({"error": "accept failed", "status": accepted.status_code}), 502
 
     threading.Thread(
-        target=lambda: asyncio.run(websocket_task(call_id)),
+        target=lambda: asyncio.run(websocket_task(call_id, customer)),
         name=f"ws-{call_id}",
         daemon=True,
     ).start()
@@ -457,6 +753,7 @@ def api_settings():
             "deployment": DEPLOYMENT,
             "endpoint": ENDPOINT,
             "arabic_variants": context.ARABIC_VARIANTS,
+            "knowledge": knowledge.status(bool(values.get("knowledge_enabled"))),
         }
     )
 
@@ -474,6 +771,7 @@ def api_preview():
     customer = db.find_customer_by_number(number) if number else None
     values = agent_settings()
     language = (customer or {}).get("preferred_language", "en")
+    accept_body = build_accept_body(customer)
     return jsonify(
         {
             "number": number,
@@ -482,13 +780,39 @@ def api_preview():
             "language": language,
             "arabic_variant": (customer or {}).get("arabic_variant", "default"),
             "voice_style": values["voice_style"],
-            "instructions": build_accept_body(customer)["instructions"],
+            "instructions": accept_body["instructions"],
             "opening": context.opening_directive(
                 customer, values["bank_name_en"], values["bank_name_ar"]
             ),
-            "accept_body": build_accept_body(customer),
+            # Redacted: the payload carries the search key in the MCP headers.
+            "accept_body": knowledge.redact(accept_body),
         }
     )
+
+
+@app.route("/api/knowledge", methods=["GET"])
+def api_knowledge():
+    """Whether the knowledge base is wired up, without contacting it."""
+    values = agent_settings()
+    return jsonify(knowledge.status(bool(values.get("knowledge_enabled"))))
+
+
+@app.route("/api/knowledge/test", methods=["POST"])
+def api_knowledge_test():
+    """Calls the knowledge base's MCP endpoint and reports what came back."""
+    if not knowledge.is_configured():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "No knowledge base configured. Set AZURE_SEARCH_ENDPOINT, "
+                    "AZURE_SEARCH_KNOWLEDGE_BASE and AZURE_SEARCH_API_KEY.",
+                }
+            ),
+            400,
+        )
+    result = knowledge.probe()
+    return jsonify(result), (200 if result.get("ok") else 502)
 
 
 @app.route("/api/stats", methods=["GET"])
@@ -522,6 +846,8 @@ if __name__ == "__main__":
     logger.info(
         f"Transcription: {values['transcription_model'] or 'disabled (assistant side only)'}"
     )
+    kb = knowledge.status(bool(values.get("knowledge_enabled")))
+    logger.info(f"Knowledge:     {kb['summary']}")
     if inserted:
         logger.info(f"Seeded {inserted} demo customers")
     logger.info(f"Console:       http://127.0.0.1:{port}/")

@@ -5,11 +5,13 @@ accept payload can carry only the values that actually differ from the
 service defaults.
 
 Grouped as the console presents them:
-  basic    — voices per language, delivery style, playback speed, transcription
-  advanced — turn detection, sampling
+  basic     — voices per language, delivery style, playback speed, transcription
+  advanced  — turn detection, sampling
+  knowledge — the Azure AI Search knowledge base the agent may consult
 """
 
 import context
+import knowledge
 
 # name -> (default, kind, group, help)
 SPEC = {
@@ -57,6 +59,56 @@ SPEC = {
         "str",
         "basic",
         "Model used to transcribe the caller. Empty disables caller transcription.",
+    ),
+    # --- knowledge base ----------------------------------------------------
+    "knowledge_enabled": (
+        True,
+        "bool",
+        "knowledge",
+        "Let the agent search the knowledge base during a call. "
+        "Has no effect until a knowledge base and search key are set in the environment.",
+    ),
+    "knowledge_topic": (
+        knowledge.DEFAULT_TOPIC,
+        "str",
+        "knowledge",
+        "What the knowledge base covers. Named in the prompt so the agent knows which "
+        "questions to look up rather than answering from memory.",
+    ),
+    "knowledge_hold_enabled": (
+        True,
+        "bool",
+        "knowledge",
+        "Speak a short holding phrase while a search is running, so a slow lookup does not "
+        "leave the caller listening to silence.",
+    ),
+    "knowledge_hold_delay_ms": (
+        5000,
+        "int",
+        "knowledge",
+        "How long to wait after the agent stops speaking before the first holding phrase. "
+        "The agent's own reply to the question usually covers the first few seconds.",
+    ),
+    "knowledge_hold_interval_ms": (
+        5000,
+        "int",
+        "knowledge",
+        "Gap between holding phrases while the search is still running.",
+    ),
+    "knowledge_hold_max": (
+        2,
+        "int",
+        "knowledge",
+        "Most holding phrases to speak during a single search. Keeps a slow lookup from "
+        "turning into chatter.",
+    ),
+    "knowledge_timeout_ms": (
+        30000,
+        "int",
+        "knowledge",
+        "How long to wait for a search before giving up and letting the agent reply without "
+        "it. Must stay comfortably above the real search time, or a healthy lookup is "
+        "abandoned mid-flight.",
     ),
     # --- advanced ----------------------------------------------------------
     "turn_detection_type": (
@@ -119,6 +171,10 @@ LIMITS = {
     "vad_prefix_padding_ms": (0, 5000),
     "vad_silence_duration_ms": (0, 5000),
     "max_output_tokens": (0, 32768),
+    "knowledge_hold_delay_ms": (0, 30000),
+    "knowledge_hold_interval_ms": (1000, 30000),
+    "knowledge_hold_max": (0, 10),
+    "knowledge_timeout_ms": (5000, 120000),
 }
 
 # Settings where an empty string is meaningful: it switches the feature off.

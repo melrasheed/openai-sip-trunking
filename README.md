@@ -137,6 +137,12 @@ Then open **<http://127.0.0.1:8000/>** for the console.
 | `DEMO_CUSTOMER_MSISDN` | – | Your own number, written over the first seed record |
 | `LOG_LEVEL` | – | `INFO` or `DEBUG` |
 | `AGENT_INSTRUCTIONS` | – | Seeds the role sentence of the prompt template on a fresh database; the console owns it afterwards |
+| `AZURE_SEARCH_ENDPOINT` | for the knowledge base | `https://<search-service>.search.windows.net` |
+| `AZURE_SEARCH_KNOWLEDGE_BASE` | for the knowledge base | Name of the knowledge base — not the index, and not a knowledge source |
+| `AZURE_SEARCH_API_KEY` | for the knowledge base | Admin or query key for the search service |
+| `AZURE_SEARCH_API_VERSION` | – | Defaults to `2026-08-01-preview` |
+| `AZURE_SEARCH_MCP_URL` | – | Overrides the derived MCP URL outright |
+| `AZURE_SEARCH_MCP_SERVER_LABEL` | – | Overrides the label the agent sees for the server |
 
 The server fails fast at startup and names any missing required variable.
 
@@ -273,6 +279,17 @@ fallback:
 python scripts/send_test_webhook.py --from +14155550123
 ```
 
+The knowledge base follow-up and the currency wording are pure logic, so they can be checked
+without a call at all:
+
+```bash
+python scripts/check_knowledge_flow.py
+```
+
+This drives the follow-up state machine through every event order that matters — the search
+finishing before the response and after it, the caller interrupting, a search that never comes
+back — and confirms no bare currency code reaches the model for any seeded customer.
+
 ---
 
 ## Project layout
@@ -282,6 +299,7 @@ src/
   app.py                Flask: webhook, JSON API, console route, realtime monitor
   db.py                 SQLite schema, migrations, seed data, queries
   context.py            SIP header parsing, number matching, profile and dialect assembly
+  knowledge.py          Azure AI Search knowledge base as a remote MCP tool
   settings_spec.py      Realtime settings: defaults, ranges, accept-payload construction
   prompts/
     system_template.txt The whole system prompt, with {placeholders} for the per-caller sections
@@ -292,6 +310,7 @@ src/
 scripts/
   webhook_endpoints.py  create | list | delete webhook endpoints
   send_test_webhook.py  Locally signed webhook for offline testing
+  check_knowledge_flow.py  Knowledge base follow-up and currency wording, checked offline
 infra/
   main.bicep            App Service plan + web app
 data/
@@ -386,6 +405,8 @@ editable. The per-caller parts are placeholders, filled in at accept time:
 | `{style}` | The delivery style chosen above |
 | `{dialect}` | The Arabic style set on the caller's profile. Empty for English callers |
 | `{opening}` | How to open the call, including how to greet the caller by name |
+| `{knowledge}` | When to consult the knowledge base. Empty when none is configured |
+| `{pronunciation}` | How to say currency codes out loud, so `QAR` is not spelled out |
 
 Everything around them — the role sentence, the accuracy rules and the guardrails — is ordinary
 text you can rewrite. The shipped default lives in `src/prompts/system_template.txt`; it is copied
@@ -419,6 +440,137 @@ ignores attempts to change its role or have it read its instructions out. It apo
 warmly and briefly — never lecturing, never repeating the refusal.
 
 Because all of that is in the template, it is yours to tighten or relax per deployment.
+
+---
+
+## Knowledge base
+
+The agent can look things up mid-call in an **Azure AI Search knowledge base**. Every knowledge
+base is itself an MCP server, exposing one read-only tool:
+
+```
+https://<service>.search.windows.net/knowledgebases/<name>/mcp?api-version=2026-08-01-preview
+```
+
+That URL is handed to the realtime service as an `mcp` tool on the accept payload, so the
+**service calls the search directly** — the audio never detours through this application, and
+there is no tool-output plumbing here to add latency to a live call.
+
+Set the three variables in the [Configuration](#configuration) table and it switches itself on:
+
+```dotenv
+AZURE_SEARCH_ENDPOINT=https://my-search.search.windows.net
+AZURE_SEARCH_KNOWLEDGE_BASE=knowledgebase638
+AZURE_SEARCH_API_KEY=<admin or query key>
+```
+
+Leave any of them empty and the feature stays dormant — no tool is attached and the prompt says
+nothing about it.
+
+**In the console**, under *Agent settings → Knowledge base*:
+
+- **Enabled** turns it off for a deployment without unsetting the credentials.
+- **Topic** is what the knowledge base covers, and is named verbatim in the prompt so the agent
+  knows which questions to look up rather than answer from memory.
+- **Test connection** handshakes with the MCP endpoint and lists its tools, so a bad key or a
+  mistyped name is found before a caller finds it.
+
+The prompt section is rendered into `{knowledge}` in the system template. A template edited
+before that placeholder existed still works: the directive is appended instead of dropped.
+
+`require_approval` is `"never"` — an approval round trip would be dead air on a phone call — and
+`allowed_tools` narrows the agent to `knowledge_base_retrieve` alone.
+
+### If the search feels slow
+
+The default `2026-08-01-preview` API version **synthesizes** an answer with a language model
+before returning it, which is why a lookup takes ten to fifteen seconds. Setting
+`AZURE_SEARCH_API_VERSION=2026-04-01` switches to plain extractive retrieval: materially faster,
+but the agent gets passages rather than a composed answer and has to do the composing itself.
+
+Worth trying if the holding phrases feel like too much of a wait. Leave it alone if you prefer
+the answer quality — the wait is already covered.
+
+### A note on the key
+
+The search key travels in an `api-key` header inside the accept payload. `/api/preview` redacts
+it, and it is never written to the transcript or the log. For production prefer a bearer token
+from managed identity with the **Search Index Data Reader** role over an admin key.
+
+### Watching it work
+
+Knowledge base activity shows up in the call transcript as `system` lines, and in the log:
+
+```
+[call_…] knowledge base connected
+[call_…] knowledge base query: {"query":"credit card annual fee"}
+[call_…] search still running, holding phrase 1
+[call_…] knowledge base search completed
+[call_…] knowledge base ready, asking for the answer
+```
+
+If the realtime deployment rejects the MCP tool outright, the call is **not** dropped: the accept
+is retried without it and the transcript records that the call is continuing without the
+knowledge base.
+
+### Why the answer needs a second nudge
+
+A remote MCP tool is run by the Realtime **service**, not by this app, so there is no result for
+us to hand back the way a local function tool would. The realtime guide is blunt about the
+consequence:
+
+> After the response is done and all of its MCP calls have finished, send another `response.create`
+> event to let the model use the results and proceed with the conversation. **The Realtime API
+> doesn't create these follow-up responses automatically.**
+
+Left alone, that is a bug you can hear: the agent says it will check, the search runs, and the
+line goes quiet until the caller asks again. `_mcp_tick()` in `src/app.py` sends that follow-up.
+
+Two details shape it. `response.done` can arrive *before* the search finishes, so this is not a
+sequence but a small state machine that fires when both halves are true, in whichever order they
+land. And the follow-up is deliberately sent **bare**, with no `instructions`: per-response
+instructions replace the session instructions wholesale, which would strip the caller's language,
+dialect and profile out of the one reply that most needs them.
+
+The follow-up also waits for the floor. If the caller is mid-sentence when the results land, the
+answer is held until they finish rather than spoken over them.
+
+### Keeping the caller company
+
+A knowledge base search can take ten to fifteen seconds, which is a long time to hold a phone to
+your ear in silence. While one is running the agent speaks short holding phrases — "still checking
+that for you" — scheduled off the same state machine and worded in the caller's own language and
+dialect. These are capped, so a slow lookup does not turn into chatter.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Speak holding phrases** | on | Whether to fill the silence at all |
+| **First holding phrase after** | 5000 ms | Delay before the first one; the agent's own reply usually covers the first few seconds |
+| **Holding phrase interval** | 5000 ms | Gap between them |
+| **Maximum holding phrases** | 2 | Ceiling per search |
+| **Search timeout** | 30000 ms | When to give up and answer without the search |
+
+Keep the timeout comfortably above the real search time. Set it near ten seconds and a healthy
+lookup gets abandoned mid-flight.
+
+---
+
+## Saying money out loud
+
+Left to itself the model reads `QAR 4,820.00` as "Q-A-R", spelling the code out letter by letter.
+On a phone call that is simply wrong. Two layers fix it, because one alone would not:
+
+- **Structured fields** — `_money()` in `src/context.py` renders amounts as words from the start,
+  so a balance reaches the model as `48,320.55 Qatari riyals`, never as a code.
+- **Free text** — seeded fields like `Auto loan, QAR 62,000 outstanding` carry the code inside a
+  sentence, well out of `_money()`'s reach. `expand_currency_codes()` rewrites those as the profile
+  is built.
+
+A `{pronunciation}` rule is added to the prompt as a backstop for anything the agent says from its
+own knowledge. Like `{knowledge}`, it is appended automatically when a stored template predates the
+placeholder, so an edited prompt keeps working without being overwritten.
+
+QAR, USD, EUR, GBP, AED and SAR are known by name; any other code falls back to the written form.
 
 ---
 
@@ -514,6 +666,16 @@ If `.failed` says the model cannot be resolved, change **Transcription model** i
 | Caller hears nothing, call drops after ~10 s | Media, not signalling. TLS signalling requires SRTP media — enable secure media on the Vonage trunk. |
 | Caller is never recognised | Check the log line `incoming from <number>`. If the number differs from the stored one, edit the customer in the console — matching tolerates formatting but not a genuinely different number. |
 | The agent invents account details | The guardrails tell it to use only the profile. Tighten them in **Agent settings → Final system prompt**, which applies from the next call. |
+| Knowledge base shows **not configured** | One of `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_KNOWLEDGE_BASE` or `AZURE_SEARCH_API_KEY` is empty. All three are needed, and `.env` is read at startup — restart after editing it. |
+| **Test connection** returns `HTTP 401` or `403` | Wrong `AZURE_SEARCH_API_KEY`, or the key belongs to a different search service than `AZURE_SEARCH_ENDPOINT`. |
+| **Test connection** says the server does not expose `knowledge_base_retrieve` | `AZURE_SEARCH_KNOWLEDGE_BASE` is pointing at an index or a knowledge *source*. Only a knowledge base has an MCP endpoint. |
+| Transcript says the call continued without the knowledge base | The realtime deployment rejected the `mcp` tool; the accept was retried without it. Check the preceding `accept rejected with knowledge base` log line for the reason. |
+| The agent never searches the knowledge base | Check `{knowledge}` survives in **Final system prompt**, that **Enabled** is on, and that **Topic** actually describes what the caller is asking about. |
+| The agent says it will check, then goes silent until nudged | The follow-up `response.create` is not reaching the service. Look for `knowledge base ready, asking for the answer` in the log; if the search never finished you will see the timeout line instead. |
+| The agent talks over the caller with the answer | It should not — the follow-up waits for the floor. If it happens, the service is not sending `input_audio_buffer.speech_started`, so the app cannot tell the caller has started. |
+| Too much chatter while waiting | Lower **Maximum holding phrases**, raise **Holding phrase interval**, or turn **Speak holding phrases** off in **Agent settings → Knowledge base**. |
+| Searches are abandoned before they finish | **Search timeout** is too close to the real search time. Raise it; the default of 30 s already allows for a slow lookup. |
+| The agent spells out "Q-A-R" | The `{pronunciation}` rule is missing from the stored prompt. It is appended automatically, so check **Final system prompt** for a line starting `Pronunciation:`. |
 | The agent chats about anything asked | The scope rules live in the template. Check they are still there — **Reset to default** restores them — and remember an edit applies from the next call, not the one in progress. |
 | The first sentence ignores the Arabic style | Something is sending `instructions` on `response.create`; that replaces the session instructions for that one response. The opening belongs in the template's `{opening}`. |
 | Tunnel worked yesterday, not today | Dev tunnels expire (30 days maximum). Recreate it and re-register the webhook URL. |

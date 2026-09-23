@@ -25,6 +25,19 @@ param azureOpenAiWebhookSecret string
 @secure()
 param adminApiToken string = ''
 
+@description('Optional Azure AI Search endpoint hosting the knowledge base, e.g. https://my-search.search.windows.net. Leave empty to run without a knowledge base.')
+param azureSearchEndpoint string = ''
+
+@description('Optional name of the Azure AI Search knowledge base (not the index).')
+param azureSearchKnowledgeBase string = ''
+
+@description('Optional admin or query key for the search service. Required for the knowledge base to be attached to calls.')
+@secure()
+param azureSearchApiKey string = ''
+
+@description('Optional Azure AI Search API version. Leave empty to use the application default.')
+param azureSearchApiVersion string = ''
+
 var planName = '${appName}-plan'
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
@@ -74,6 +87,22 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'ADMIN_API_TOKEN'
           value: adminApiToken
+        }
+        {
+          name: 'AZURE_SEARCH_ENDPOINT'
+          value: azureSearchEndpoint
+        }
+        {
+          name: 'AZURE_SEARCH_KNOWLEDGE_BASE'
+          value: azureSearchKnowledgeBase
+        }
+        {
+          name: 'AZURE_SEARCH_API_KEY'
+          value: azureSearchApiKey
+        }
+        {
+          name: 'AZURE_SEARCH_API_VERSION'
+          value: azureSearchApiVersion
         }
         {
           name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'

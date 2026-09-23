@@ -377,7 +377,21 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
           </div>
 
           <div>
-            <div class="section-head"><h2 data-i18n="arabicStyles">Arabic styles</h2></div>
+            <div class="section-head"><h2 data-i18n="knowledge">Knowledge base</h2></div>
+            <div class="card card-pad">
+              <p class="hint" style="margin-top:0" data-i18n="knowledgeHelp">
+                An Azure AI Search knowledge base the agent can search mid-call. The realtime service calls it directly over MCP. Connection details come from the environment; what it covers is set here.
+              </p>
+              <p id="kbStatus" style="margin:10px 0"></p>
+              <div id="knowledgeSettings"></div>
+              <div class="row">
+                <button class="btn ghost" onclick="testKnowledge()" data-i18n="testConnection">Test connection</button>
+                <button class="btn" onclick="saveSettings()" data-i18n="saveSettings">Save</button>
+              </div>
+              <div class="hint" id="kbTestOut" style="margin-top:8px"></div>
+            </div>
+
+            <div class="section-head" style="margin-top:20px"><h2 data-i18n="arabicStyles">Arabic styles</h2></div>
             <details class="adv">
               <summary data-i18n="arabicStylesSummary">Dialect prompts (Faseeh and Qatari)</summary>
               <div class="inner">
@@ -524,6 +538,9 @@ const I18N = {
     save:"حفظ",cancel:"إلغاء",
     delete:"حذف",arabicStyles:"الأساليب العربية",preview:"معاينة",run:"تشغيل",
     savePrompts:"حفظ الأساليب",turnDetection:"كشف الأدوار وحدود الرد",
+    knowledge:"قاعدة المعرفة",saveSettings:"حفظ",testConnection:"اختبار الاتصال",
+    knowledgeHelp:"قاعدة معرفة في Azure AI Search يمكن للوكيل البحث فيها أثناء المكالمة، وتتصل بها خدمة الزمن الحقيقي مباشرةً عبر MCP. تُضبط بيانات الاتصال في متغيرات البيئة، أما نطاق المواضيع فيُحدَّد هنا.",
+    kbActive:"متصلة",kbOff:"موقوفة",kbUnset:"غير مضبوطة",
     arabicStylesSummary:"نصوص اللهجات (الفصحى والقطرية)",
     finalPrompt:"التعليمات النهائية للنظام",savePrompt:"حفظ التعليمات",resetPrompt:"استعادة الافتراضي",
     finalPromptWarning:"هذه هي التعليمات الكاملة المرسلة عند قبول المكالمة. تعديلها يغيّر ما يسمعه كل متصل، وحذف أي عنصر نائب يحذف ذلك القسم — فإذا حذفت {profile} لن يعرف الوكيل هوية المتصل.",
@@ -854,7 +871,35 @@ window.loadSettings = async function(){
     `<div><code>{${esc(name)}}</code> — ${esc(help)}</div>`).join("");
   $("basicSettings").innerHTML = s.settings.filter(x => x.group==="basic").map(controlFor).join("");
   $("advSettings").innerHTML = s.settings.filter(x => x.group==="advanced").map(controlFor).join("");
+  $("knowledgeSettings").innerHTML = s.settings.filter(x => x.group==="knowledge").map(controlFor).join("");
+  renderKnowledgeStatus(s.knowledge || {});
   $("envPill").textContent = s.deployment;
+};
+
+function renderKnowledgeStatus(kb){
+  const t = I18N[state.lang] || {};
+  const pill = kb.active ? `<span class="pill ok">${esc(t.kbActive || "connected")}</span>`
+             : kb.configured ? `<span class="pill">${esc(t.kbOff || "switched off")}</span>`
+             : `<span class="pill bad">${esc(t.kbUnset || "not configured")}</span>`;
+  // Never the key: only where it points and what it exposes.
+  const detail = kb.url
+    ? `<span class="pill">${esc(kb.name || "—")}</span> <span class="pill">${esc(kb.api_version || "")}</span>`
+    : "";
+  $("kbStatus").innerHTML = pill + " " + detail;
+  $("kbTestOut").textContent = kb.url ? kb.url : "";
+}
+
+window.testKnowledge = async function(){
+  $("kbTestOut").textContent = "Testing…";
+  try {
+    const res = await fetch("/api/knowledge/test", {method:"POST"});
+    const out = await res.json().catch(() => ({}));
+    $("kbTestOut").textContent = out.ok
+      ? `OK — ${out.server || "server"} exposes ${(out.tools || []).join(", ")}.`
+      : (out.error || "Test failed.");
+  } catch (e) {
+    $("kbTestOut").textContent = "Test failed: " + e;
+  }
 };
 
 window.saveSettings = async function(){
@@ -893,6 +938,8 @@ window.preview = async function(){
       <span class="pill">${esc(out.voice_style)}</span></p>
     <label>Accept payload</label>
     <pre>${esc(JSON.stringify(out.accept_body.audio, null, 2))}</pre>
+    ${(out.accept_body.tools || []).length ? `<label>Tools</label>
+    <pre>${esc(JSON.stringify(out.accept_body.tools, null, 2))}</pre>` : ""}
     <label>Final system prompt (${out.instructions.length} chars)</label>
     <pre>${esc(out.instructions)}</pre>`;
   reveal("#previewOut", { opacity:[0,1] }, { duration:.3 });
