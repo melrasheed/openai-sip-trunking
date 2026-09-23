@@ -144,6 +144,3 @@ venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-
-# Runtime database (created and seeded on first run)
-data/
