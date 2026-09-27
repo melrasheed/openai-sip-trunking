@@ -211,10 +211,56 @@ details.adv[open]>summary::before{transform:rotate(90deg)}
 details.adv .inner{padding:4px 18px 18px;border-top:1px solid var(--line)}
 pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border-radius:10px;
     white-space:pre-wrap;word-break:break-word;font-size:11.5px;line-height:1.6;max-height:300px;overflow:auto}
+
+/* ---------- web call ---------------------------------------------------- */
+.webcall-btn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.webcall-btn svg{width:14px;height:14px;flex:0 0 14px}
+td.action-cell{text-align:end;white-space:nowrap;width:1%}
+/* One web call at a time: every other way of starting one looks unavailable. */
+.in-web-call .webcall-btn{opacity:.45;cursor:not-allowed}
+.in-web-call .webcall-btn:hover{border-color:var(--line);color:var(--text)}
+/* Keeps the call card usable while the customer drawer's scrim is up. */
+.in-web-call .sidebar{z-index:65}
+.pill.chan{font-size:10.5px;padding:1px 8px;margin-inline-start:6px;vertical-align:1px}
+
+.call-card{margin:0 12px 12px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.call-card[hidden],.call-card [hidden]{display:none}
+.cc-head{display:flex;align-items:center;gap:10px}
+.cc-name{font-weight:600;font-size:13.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cc-sub{font-size:11.5px;color:var(--muted)}
+.cc-state{display:flex;align-items:center;gap:8px;margin:11px 0;font-size:12px;color:var(--muted);min-height:18px}
+.cc-state.error{color:var(--bad)}
+.cc-state.error .dot{display:none}
+#ccStatus{font-variant-numeric:tabular-nums}
+.cc-who{display:inline-flex;align-items:center;gap:5px}
+.cc-who.on{color:var(--primary)}
+.cc-actions{display:flex;gap:8px}
+.cc-actions .btn{flex:1}
+.cc-actions .btn[aria-pressed="true"]{border-color:var(--primary);color:var(--primary)}
+/* The live transcript is deliberately quiet: collapsed until asked for, and
+   plain muted text rather than the Calls view's conversation bubbles. */
+details.cc-transcript{margin-top:11px;font-size:11.5px}
+details.cc-transcript>summary{cursor:pointer;color:var(--muted);list-style:none}
+details.cc-transcript>summary::-webkit-details-marker{display:none}
+details.cc-transcript>summary::before{content:"▸";display:inline-block;margin-inline-end:5px;transition:transform .2s}
+details.cc-transcript[open]>summary::before{transform:rotate(90deg)}
+[dir="rtl"] details.cc-transcript>summary::before{transform:scaleX(-1)}
+[dir="rtl"] details.cc-transcript[open]>summary::before{transform:rotate(90deg)}
+.cc-lines{max-height:128px;overflow-y:auto;margin:7px 0 6px;color:var(--muted);line-height:1.5}
+.cc-lines div{margin-bottom:4px}
+.cc-lines b{font-weight:500;color:var(--text);opacity:.7}
+.cc-open{font-size:11.5px}
+.webcall-mini{display:none;align-items:center;gap:8px}
+/* On narrower windows the row button drops to its icon, so the table's own
+   columns keep their room. Its label stays as the accessible name. */
+@media (max-width:1100px){ td.action-cell .webcall-btn span{display:none} }
+
 @media (max-width:900px){
   .sidebar{position:fixed;transform:translateX(-100%);z-index:80;transition:transform .3s}
   .sidebar.open{transform:translateX(0)}
   .two{grid-template-columns:1fr}
+  /* The sidebar is off-canvas here, so the header carries the call controls. */
+  .in-web-call .webcall-mini{display:inline-flex}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -250,6 +296,30 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
         <span data-i18n="settings">Agent settings</span>
       </button>
     </nav>
+    <div class="call-card" id="callCard" hidden>
+      <div class="cc-head">
+        <div class="avatar" id="ccAvatar"></div>
+        <div style="min-width:0">
+          <div class="cc-name" id="ccName"></div>
+          <div class="cc-sub"><span class="num" id="ccNumber"></span> · <span data-i18n="webCall">Web call</span></div>
+        </div>
+      </div>
+      <div class="cc-state" id="ccState" aria-live="polite">
+        <span class="dot pulse" id="ccDot"></span>
+        <span id="ccStatus"></span>
+        <span class="spacer"></span>
+        <span class="cc-who" id="ccWho"></span>
+      </div>
+      <div class="cc-actions" id="ccActions">
+        <button class="btn sm ghost" id="ccMute" aria-pressed="false" onclick="WebCall.toggleMute()"></button>
+        <button class="btn sm danger" onclick="WebCall.hangUp()" data-i18n="hangUp">Hang up</button>
+      </div>
+      <details class="cc-transcript" id="ccTranscript" ontoggle="WebCall.toggleTranscript()">
+        <summary data-i18n="liveTranscript">Live transcript</summary>
+        <div class="cc-lines" id="ccLines"></div>
+        <a href="#" class="cc-open" onclick="WebCall.openInCalls(event)" data-i18n="openInCalls">Open in Calls</a>
+      </details>
+    </div>
     <div class="side-foot">
       <button class="icon-btn" id="themeBtn" title="Toggle theme">◐ <span data-i18n="theme">Theme</span></button>
       <button class="icon-btn" id="langBtn" title="Toggle interface language">⇄ <span id="langLabel">العربية</span></button>
@@ -261,6 +331,10 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
       <button class="icon-btn" style="flex:0 0 auto;display:none" id="menuBtn">☰</button>
       <h1 id="viewTitle" data-i18n="overview">Overview</h1>
       <div class="spacer"></div>
+      <span class="webcall-mini">
+        <span class="pill live"><span class="dot pulse"></span> <span id="wcMiniStatus"></span></span>
+        <button class="btn sm danger" onclick="WebCall.hangUp()" data-i18n="hangUp">Hang up</button>
+      </span>
       <span id="liveIndicator"></span>
       <span class="pill" id="envPill"></span>
     </header>
@@ -303,7 +377,7 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
           <thead><tr>
             <th data-i18n="thCustomer">Customer</th><th data-i18n="thMobile">Mobile</th>
             <th data-i18n="thLanguage">Language</th><th data-i18n="thSegment">Segment</th>
-            <th data-i18n="thBalance">Balance</th>
+            <th data-i18n="thBalance">Balance</th><th></th>
           </tr></thead>
           <tbody id="custRows"></tbody>
         </table></div>
@@ -416,6 +490,11 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
               <div class="row">
                 <input id="p_number" value="+97433344556" style="flex:1">
                 <button class="btn ghost" onclick="preview()" data-i18n="run">Run</button>
+                <button class="btn ghost webcall-btn" onclick="WebCall.start($('p_number').value)"
+                        title="Call the agent from this browser from the number above">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg>
+                  <span data-i18n="webCall">Web call</span>
+                </button>
               </div>
               <div id="previewOut"></div>
             </div>
@@ -434,6 +513,10 @@ pre{background:var(--surface-2);border:1px solid var(--line);padding:13px;border
     <div><div id="dTitle" style="font-weight:600">Add customer</div>
          <div class="hint" id="dSub" style="margin:0"></div></div>
     <div class="spacer"></div>
+    <button class="btn sm ghost webcall-btn" id="dWebCall" style="display:none" onclick="WebCall.startFromDrawer()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg>
+      <span data-i18n="webCall">Web call</span>
+    </button>
     <button class="btn sm ghost" onclick="closeDrawer()">✕</button>
   </header>
   <div class="body">
@@ -550,7 +633,19 @@ const I18N = {
     arabicStyle:"الأسلوب العربي",accountType:"نوع الحساب",segment:"الشريحة",balance:"الرصيد",
     currency:"العملة",branch:"الفرع",cardStatus:"حالة البطاقة",lastAmt:"مبلغ آخر عملية",
     lastMerch:"التاجر",lastDate:"التاريخ",rm:"مدير العلاقة",kyc:"حالة اعرف عميلك",kycExp:"انتهاء اعرف عميلك",
-    openCase:"بلاغ مفتوح",loan:"ملخص القرض",searchPh:"ابحث بالاسم أو الرقم…"},
+    openCase:"بلاغ مفتوح",loan:"ملخص القرض",searchPh:"ابحث بالاسم أو الرقم…",
+    webCall:"مكالمة ويب",webCallAs:"اتصل بالوكيل من هذا المتصفح باسم",
+    webCallFrom:"اتصل بالوكيل من هذا المتصفح من الرقم",hangUp:"إنهاء",mute:"كتم",
+    unmute:"إلغاء الكتم",connecting:"جارٍ الاتصال…",callEnded:"انتهت المكالمة",
+    callFailed:"تعذّر إجراء المكالمة. حاول مرة أخرى.",
+    micBlocked:"الميكروفون محظور. اسمح به لهذا الموقع من شريط العنوان ثم حاول مجددًا.",
+    audioFailed:"تعذّر تشغيل الصوت في هذا المتصفح. استخدم Edge أو Chrome.",
+    needsSecure:"تحتاج مكالمات الويب إلى فتح المنصة عبر https أو localhost.",
+    liveTranscript:"النص المباشر",openInCalls:"فتح في المكالمات",agentSpeaking:"الوكيل يتحدث",
+    youSpeaking:"أنت تتحدث",listening:"يستمع",muted:"الصوت مكتوم",unknownCaller:"متصل غير معروف",
+    noNumber:"بدون رقم",nothingYet:"لم يُقل شيء بعد.",agent:"الوكيل",you:"أنت",
+    chanPhone:"هاتف",chanWeb:"ويب",
+    noCalls:"لا توجد مكالمات بعد. اتصل برقم SIP، أو أجرِ مكالمة ويب من صفحة العملاء."},
   en:{}
 };
 
@@ -559,6 +654,8 @@ let state = { customers:[], calls:[], settings:null, variants:{}, editing:null,
 
 const $ = id => document.getElementById(id);
 const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// The active language's wording for dynamic text, falling back to English.
+const tr = (key, en) => (I18N[state.lang] || {})[key] || en;
 const initials = n => (n||"?").split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase();
 const money = (v,c) => v==null ? "" : `${c||""} ${Number(v).toLocaleString(undefined,{minimumFractionDigits:2})}`.trim();
 const mo = () => window.__motion || { animate:()=>({finished:Promise.resolve()}), stagger:()=>0 };
@@ -633,6 +730,7 @@ function setLang(lang){
   const active = document.querySelector("nav button.active span");
   if (active) $("viewTitle").textContent = active.textContent;
   localStorage.setItem("cbq-lang", lang);
+  if (window.WebCall) WebCall.render();
 }
 
 /* ---------- overview ---------- */
@@ -690,8 +788,9 @@ function renderCustomers(){
             : `<span class="pill">English</span>`}</td>
       <td>${esc(c.segment||"")}</td>
       <td><span class="num">${esc(money(c.balance,c.currency))}</span></td>
+      <td class="action-cell">${WebCall.button(c.mobile_e164, c.full_name_en)}</td>
     </tr>`).join("")
-    : `<tr><td colspan="5" class="empty">No customers match “${esc(q)}”.</td></tr>`;
+    : `<tr><td colspan="6" class="empty">No customers match “${esc(q)}”.</td></tr>`;
   reveal("#custRows tr", { opacity:[0,1] }, { duration:.25, delay: mo().stagger(.03) });
 }
 $("custSearch").oninput = renderCustomers;
@@ -712,6 +811,9 @@ window.openDrawer = function(id){
   $("dSub").textContent = c ? c.mobile_e164 : "New record";
   $("dAvatar").textContent = c ? initials(c.full_name_en) : "+";
   $("deleteBtn").style.display = c ? "" : "none";
+  // A web call needs a saved number to match, so only existing records get one.
+  $("dWebCall").style.display = c ? "" : "none";
+  if (c) $("dWebCall").title = `${tr("webCallAs", "Call the agent from this browser as")} ${c.full_name_en}`;
   toggleVariant();
   $("scrim").classList.add("open"); $("drawer").classList.add("open");
 };
@@ -778,12 +880,14 @@ window.loadCalls = async function(force){
     <tr onclick="selectCall('${esc(c.call_id)}','${esc(c.status)}')"
         ${state.call === c.call_id ? 'style="background:var(--surface-2)"' : ""}>
       <td class="when-cell">${esc(shortWhen(c.started_at))}</td>
-      <td><span class="num">${esc(c.from_number||"unknown")}</span></td>
+      <td><span class="num">${esc(c.from_number||"unknown")}</span>${c.channel === "web"
+        ? `<span class="pill chan" data-i18n="chanWeb" data-en="Web">${esc(tr("chanWeb","Web"))}</span>`
+        : `<span class="pill chan" data-i18n="chanPhone" data-en="Phone">${esc(tr("chanPhone","Phone"))}</span>`}</td>
       <td>${c.matched ? esc(c.full_name_en) : '<span class="muted">no match</span>'}</td>
       <td class="status-cell"><span class="pill ${STATUS_CLASS[c.status]||""}">
         ${c.status==="in_progress"?'<span class="dot pulse"></span> ':""}${esc(STATUS_LABEL[c.status]||c.status)}</span></td>
     </tr>`).join("")
-    : `<tr><td colspan="4" class="empty">No calls yet. Ring your SIP number to see one appear here.</td></tr>`;
+    : `<tr><td colspan="4" class="empty">${esc(tr("noCalls", "No calls yet. Ring your SIP number, or place a web call from Customers."))}</td></tr>`;
 
   if (state.call) {
     const current = rows.find(c => c.call_id === state.call);
@@ -944,6 +1048,405 @@ window.preview = async function(){
     <pre>${esc(out.instructions)}</pre>`;
   reveal("#previewOut", { opacity:[0,1] }, { duration:.3 });
 };
+
+/* ---------- web call ----------
+   A call to the agent from this browser instead of a phone, for when the SIP
+   trunk will not cooperate. The server contextualises it exactly like a phone
+   call from the same number; all this side does is move audio. The microphone
+   goes up the socket as 24 kHz PCM16 frames, and the agent's voice comes back
+   down into a playback buffer. */
+const WEB_RATE = 24000;       // the rate the server configures the session for
+const FRAME_SAMPLES = 960;    // 40 ms of microphone per frame
+const PHONE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a1 1 0 01-1 1A16 16 0 014 5a1 1 0 011-1z"/></svg>`;
+
+// Both run on the audio thread, inlined as a Blob so the console stays a
+// single file with no build step. Capture turns the microphone into PCM16
+// frames. Playback queues the agent's audio and counts how much of each reply
+// has actually been played, which is what a barge-in has to report.
+const WEB_CALL_WORKLETS = `
+class Capture extends AudioWorkletProcessor {
+  constructor(){
+    super();
+    this.frame = new Int16Array(${FRAME_SAMPLES}); this.n = 0; this.muted = false;
+    this.port.onmessage = e => { this.muted = !!e.data.muted; };
+  }
+  process(inputs){
+    const input = inputs[0] && inputs[0][0];
+    if (!input) return true;
+    for (let i = 0; i < input.length; i++) {
+      // Muted still sends frames, of silence, so voice detection keeps time.
+      const s = this.muted ? 0 : Math.max(-1, Math.min(1, input[i]));
+      this.frame[this.n++] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      if (this.n === this.frame.length) {
+        this.port.postMessage(this.frame.buffer, [this.frame.buffer]);
+        this.frame = new Int16Array(${FRAME_SAMPLES}); this.n = 0;
+      }
+    }
+    return true;
+  }
+}
+class Playback extends AudioWorkletProcessor {
+  constructor(){
+    super();
+    this.queue = []; this.offset = 0; this.item = null; this.played = 0; this.playing = false;
+    this.port.onmessage = e => {
+      const m = e.data;
+      if (m.type === "push") { this.queue.push(m); return; }
+      if (m.type === "flush") {
+        const head = this.queue[0];
+        const cut = head ? { item: head.item, played: head.item === this.item ? this.played : 0 } : null;
+        this.queue = []; this.offset = 0;
+        this.port.postMessage({ type: "cut", cut });
+      }
+    };
+  }
+  process(inputs, outputs){
+    const out = outputs[0][0];
+    let i = 0;
+    while (i < out.length && this.queue.length) {
+      const head = this.queue[0];
+      if (head.item !== this.item) { this.item = head.item; this.played = 0; }
+      const n = Math.min(out.length - i, head.samples.length - this.offset);
+      out.set(head.samples.subarray(this.offset, this.offset + n), i);
+      i += n; this.offset += n; this.played += n;
+      if (this.offset === head.samples.length) { this.queue.shift(); this.offset = 0; }
+    }
+    out.fill(0, i);
+    const playing = i > 0;
+    if (playing !== this.playing) { this.playing = playing; this.port.postMessage({ type: "playing", playing }); }
+    return true;
+  }
+}
+registerProcessor("web-call-capture", Capture);
+registerProcessor("web-call-playback", Playback);`;
+
+const withTimeout = (promise, ms) => Promise.race([promise,
+  new Promise((_, reject) => setTimeout(() => reject(new Error("timed out")), ms))]);
+
+const WebCall = window.WebCall = {
+  call: null,
+
+  button(number, name){
+    const title = `${tr("webCallAs", "Call the agent from this browser as")} ${name || number}`;
+    return `<button class="btn sm ghost webcall-btn" title="${esc(title)}" aria-label="${esc(title)}" data-number="${esc(number)}"
+      onclick="event.stopPropagation();WebCall.start(this.dataset.number)">${PHONE_ICON}
+      <span data-i18n="webCall" data-en="Web call">${esc(tr("webCall", "Web call"))}</span></button>`;
+  },
+
+  startFromDrawer(){
+    const c = state.customers.find(x => x.id === state.editing);
+    if (c) this.start(c.mobile_e164);
+  },
+
+  async start(number){
+    if (this.call && !this.call.ended) return;
+    number = (number || "").trim();
+    const known = state.customers.find(c => c.mobile_e164 === number);
+    const call = this.call = { number, name: known ? known.full_name_en : null, matched: known ? true : null,
+                               phase: "connecting", muted: false, lastLine: 0, peers: [] };
+    document.body.classList.add("in-web-call");
+    $("ccTranscript").open = false;
+    $("ccLines").innerHTML = `<div class="cc-empty">${esc(tr("nothingYet", "Nothing said yet."))}</div>`;
+    this.render();
+
+    // The microphone first: if it is refused, no session is ever opened.
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      return this.end(tr("needsSecure", "Web calls need the console on https or localhost."), call);
+    }
+    try {
+      call.mic = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    } catch (err) {
+      console.warn("Microphone unavailable", err);
+      return this.end(tr("micBlocked", "Microphone blocked. Allow it for this site in the address bar, then try again."), call);
+    }
+    if (call.ended) return this.release(call);
+
+    try {
+      await this.wire(call);
+    } catch (err) {
+      console.error("Web call audio setup failed", err);
+      return this.end(tr("audioFailed", "Audio could not start in this browser. Use Edge or Chrome."), call);
+    }
+    if (call.ended) return this.release(call);
+
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = call.ws = new WebSocket(`${scheme}//${location.host}/api/web-call?number=${encodeURIComponent(number)}`);
+    ws.binaryType = "arraybuffer";
+    // Nothing goes up until the agent is on the line, so the first thing it
+    // hears is the caller rather than a backlog of room noise.
+    call.capture.port.onmessage = e => {
+      if (call.phase === "live" && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+    };
+    ws.onmessage = e => this.onMessage(call, e.data);
+    ws.onclose = () => this.end(null, call);
+  },
+
+  async wire(call){
+    const ctx = call.ctx = new AudioContext({ sampleRate: WEB_RATE, latencyHint: "interactive" });
+    if (ctx.sampleRate !== WEB_RATE) throw new Error(`audio context runs at ${ctx.sampleRate} Hz`);
+    const url = URL.createObjectURL(new Blob([WEB_CALL_WORKLETS], { type: "text/javascript" }));
+    try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+
+    call.capture = new AudioWorkletNode(ctx, "web-call-capture",
+      { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+    ctx.createMediaStreamSource(call.mic).connect(call.capture);
+    // Nodes only run while something downstream pulls on them; a silent path
+    // to the output keeps the microphone flowing.
+    const sink = ctx.createGain();
+    sink.gain.value = 0;
+    call.capture.connect(sink).connect(ctx.destination);
+
+    call.player = new AudioWorkletNode(ctx, "web-call-playback",
+      { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+    call.player.port.onmessage = e => this.onPlayer(call, e.data);
+    await this.route(call);
+    await ctx.resume();
+  },
+
+  /* The agent's voice goes through a local peer connection into an <audio>
+     element instead of straight out of Web Audio. Chromium's echo canceller
+     always tracks that path, so on laptop or room speakers the microphone does
+     not pick the agent back up, in Edge as well as Chrome. If the loopback
+     cannot come up, play directly rather than not at all. */
+  async route(call){
+    const ctx = call.ctx;
+    try {
+      const dest = ctx.createMediaStreamDestination();
+      call.player.connect(dest);
+      const [a, b] = call.peers = [new RTCPeerConnection(), new RTCPeerConnection()];
+      a.onicecandidate = e => e.candidate && b.addIceCandidate(e.candidate).catch(() => {});
+      b.onicecandidate = e => e.candidate && a.addIceCandidate(e.candidate).catch(() => {});
+      const remote = new Promise(resolve => { b.ontrack = e => resolve(e.streams[0] || new MediaStream([e.track])); });
+      const up = new Promise((resolve, reject) => {
+        a.onconnectionstatechange = () => {
+          if (a.connectionState === "connected") resolve();
+          if (a.connectionState === "failed") reject(new Error("loopback failed"));
+        };
+      });
+      dest.stream.getAudioTracks().forEach(track => a.addTrack(track, dest.stream));
+      await a.setLocalDescription(await a.createOffer());
+      await b.setRemoteDescription(a.localDescription);
+      await b.setLocalDescription(await b.createAnswer());
+      await a.setRemoteDescription(b.localDescription);
+      const audio = call.audio = new Audio();
+      audio.srcObject = await withTimeout(remote, 3000);
+      await withTimeout(up, 3000);
+      await audio.play();
+      call.path = "loopback";
+    } catch (err) {
+      console.warn("Loopback playback unavailable, playing directly; use a headset to avoid echo.", err);
+      call.peers.forEach(p => p.close());
+      call.peers = [];
+      if (call.audio) { call.audio.srcObject = null; call.audio = null; }
+      call.player.disconnect();
+      call.player.connect(ctx.destination);
+      call.path = "direct";
+    }
+  },
+
+  onMessage(call, data){
+    if (call.ended || typeof data !== "string") return;
+    let m;
+    try { m = JSON.parse(data); } catch { return; }
+    if (m.type === "response.output_audio.delta") return this.play(call, m.item_id, m.delta);
+    if (m.type === "input_audio_buffer.speech_started") {
+      // The caller is talking over the agent: stop playing it at once.
+      call.player.port.postMessage({ type: "flush" });
+      return this.speaking(call, "caller", true);
+    }
+    if (m.type === "input_audio_buffer.speech_stopped") return this.speaking(call, "caller", false);
+    if (m.type === "web_call.started") {
+      Object.assign(call, { callId: m.call_id, name: m.name, matched: m.matched });
+    } else if (m.type === "web_call.connected") {
+      call.phase = "live";
+      call.startedAt = Date.now();
+      call.timer = setInterval(() => this.renderStatus(), 1000);
+    } else if (m.type === "web_call.error") {
+      call.error = m.message;
+    }
+    if (this.call === call) this.render();
+  },
+
+  play(call, item, delta){
+    const bytes = Uint8Array.from(atob(delta), ch => ch.charCodeAt(0));
+    const pcm = new Int16Array(bytes.buffer, 0, bytes.length >> 1);
+    const samples = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 0x8000;
+    call.player.port.postMessage({ type: "push", item, samples }, [samples.buffer]);
+  },
+
+  onPlayer(call, m){
+    if (call.ended) return;
+    if (m.type === "playing") return this.speaking(call, "agent", m.playing);
+    if (m.type === "cut" && m.cut && call.ws && call.ws.readyState === WebSocket.OPEN) {
+      // Tell the service how much of the reply was heard before the caller cut in.
+      call.ws.send(JSON.stringify({ type: "truncate", item_id: m.cut.item,
+                                    audio_end_ms: Math.floor(m.cut.played * 1000 / WEB_RATE) }));
+    }
+  },
+
+  speaking(call, who, on){
+    if (who === "agent") {
+      clearTimeout(call.quiet);
+      // A short gap between audio chunks is not the end of a sentence.
+      if (!on) {
+        call.quiet = setTimeout(() => { call.agentSpeaking = false; if (this.call === call) this.renderWho(); }, 400);
+        return;
+      }
+      call.agentSpeaking = true;
+    } else {
+      call.callerSpeaking = on;
+    }
+    if (this.call === call) this.renderWho();
+  },
+
+  toggleMute(){
+    const call = this.call;
+    if (!call || call.ended) return;
+    call.muted = !call.muted;
+    if (call.capture) call.capture.port.postMessage({ muted: call.muted });
+    this.render();
+  },
+
+  hangUp(){
+    if (this.call) this.call.hungUp = true;
+    this.end();
+  },
+
+  end(message, call = this.call){
+    if (!call || call.ended) return;
+    call.ended = true;
+    call.endedAt = Date.now();
+    const failure = message || call.error
+      || (call.phase === "live" || call.hungUp ? null : tr("callFailed", "The call could not be connected. Try again."));
+    call.phase = failure ? "failed" : "ended";
+    call.message = failure;
+    this.release(call);
+    if (this.call === call) {
+      document.body.classList.remove("in-web-call");
+      this.render();
+      if ($("ccTranscript").open) this.fetchLines(call);
+      // Leave the outcome on screen for a moment, then get out of the way.
+      setTimeout(() => { if (this.call === call) { this.call = null; $("callCard").hidden = true; } },
+                 failure ? 8000 : 4000);
+    }
+    if ($("view-calls").classList.contains("active")) loadCalls(true); else loadStats();
+  },
+
+  release(call){
+    clearInterval(call.timer); clearInterval(call.poll); clearTimeout(call.quiet);
+    const ws = call.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Ask the server to hang up, so it closes the socket cleanly from its
+      // end; close it from ours only if it does not.
+      ws.send(JSON.stringify({ type: "hangup" }));
+      setTimeout(() => { if (ws.readyState <= WebSocket.OPEN) ws.close(); }, 1500);
+    } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+    }
+    if (call.mic) call.mic.getTracks().forEach(t => t.stop());
+    (call.peers || []).forEach(p => p.close());
+    if (call.audio) { call.audio.pause(); call.audio.srcObject = null; }
+    if (call.ctx && call.ctx.state !== "closed") call.ctx.close().catch(() => {});
+  },
+
+  elapsed(call){
+    if (!call.startedAt) return "00:00";
+    const s = Math.max(0, Math.floor(((call.endedAt || Date.now()) - call.startedAt) / 1000));
+    return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  },
+
+  render(){
+    const call = this.call;
+    if (!call) return;
+    $("callCard").hidden = false;
+    $("ccAvatar").textContent = call.name ? initials(call.name) : "?";
+    $("ccName").textContent = call.name
+      || (call.matched === false ? tr("unknownCaller", "Unknown caller") : tr("webCall", "Web call"));
+    $("ccNumber").textContent = call.number || tr("noNumber", "no number");
+    const live = call.phase === "connecting" || call.phase === "live";
+    $("ccState").classList.toggle("error", call.phase === "failed");
+    $("ccDot").hidden = !live;
+    $("ccDot").style.color = call.phase === "live" ? "var(--ok)" : "var(--gold)";
+    $("ccActions").hidden = !live;
+    $("ccMute").textContent = call.muted ? tr("unmute", "Unmute") : tr("mute", "Mute");
+    $("ccMute").setAttribute("aria-pressed", call.muted ? "true" : "false");
+    $("ccTranscript").hidden = !call.callId || call.phase === "failed";
+    this.renderStatus();
+    this.renderWho();
+  },
+
+  renderStatus(){
+    const call = this.call;
+    if (!call) return;
+    $("ccStatus").textContent =
+        call.phase === "connecting" ? tr("connecting", "Connecting…")
+      : call.phase === "live" ? this.elapsed(call)
+      : call.phase === "ended" ? `${tr("callEnded", "Call ended")} · ${this.elapsed(call)}`
+      : call.message || "";
+    $("wcMiniStatus").textContent = call.phase === "live" ? this.elapsed(call) : tr("connecting", "Connecting…");
+  },
+
+  renderWho(){
+    const call = this.call;
+    if (!call) return;
+    const who = $("ccWho");
+    const callerOn = call.callerSpeaking && !call.muted;
+    who.classList.toggle("on", call.phase === "live" && (callerOn || !!call.agentSpeaking));
+    who.innerHTML = call.phase !== "live" ? ""
+      : callerOn ? `<span class="dot"></span> ${esc(tr("youSpeaking", "You're speaking"))}`
+      : call.agentSpeaking ? `<span class="wave"><i></i><i></i><i></i><i></i><i></i></span> ${esc(tr("agentSpeaking", "Agent speaking"))}`
+      : esc(call.muted ? tr("muted", "Muted") : tr("listening", "Listening"));
+  },
+
+  // Kept deliberately quiet: the last few things said, without the system
+  // notes the Calls view shows. It only polls while it is open.
+  toggleTranscript(){
+    const call = this.call;
+    if (!call) return;
+    clearInterval(call.poll);
+    if (!$("ccTranscript").open || !call.callId) return;
+    this.fetchLines(call);
+    if (!call.ended) call.poll = setInterval(() => this.fetchLines(call), 1500);
+  },
+
+  async fetchLines(call){
+    if (!call.callId) return;
+    let lines;
+    try {
+      lines = await (await fetch(`/api/calls/${encodeURIComponent(call.callId)}/transcript?after=${call.lastLine}`)).json();
+    } catch { return; }
+    if (this.call !== call || !lines.length) return;
+    const box = $("ccLines");
+    lines.forEach(l => {
+      call.lastLine = Math.max(call.lastLine, l.id);
+      if (l.role !== "assistant" && l.role !== "caller") return;
+      box.querySelector(".cc-empty")?.remove();
+      const line = document.createElement("div");
+      const arabic = /[\u0600-\u06FF]/.test(l.text);
+      // dir="auto" keeps an English line's punctuation in place when the
+      // console itself is right-to-left, and vice versa.
+      line.innerHTML = `<b>${esc(l.role === "assistant" ? tr("agent", "Agent") : tr("you", "You"))}</b> `
+                     + `<span dir="auto"${arabic ? ' class="ar"' : ""}>${esc(l.text)}</span>`;
+      box.appendChild(line);
+    });
+    while (box.children.length > 8) box.removeChild(box.firstElementChild);
+    box.scrollTop = box.scrollHeight;
+  },
+
+  openInCalls(event){
+    event.preventDefault();
+    const call = this.call;
+    if (!call || !call.callId) return;
+    closeDrawer();
+    showView("calls");
+    selectCall(call.callId, call.ended ? "completed" : "in_progress");
+  },
+};
+
+// Leaving or reloading the page hangs up rather than leaving a session open.
+window.addEventListener("pagehide", () => WebCall.hangUp());
 
 /* ---------- boot ---------- */
 setLang(localStorage.getItem("cbq-lang") || "en");

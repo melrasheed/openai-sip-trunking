@@ -14,6 +14,11 @@ webhook, matched against the customer database, and the resulting profile is
 injected into the accept-time `instructions`. The agent therefore knows who it
 is speaking to from its first word.
 
+The same agent can also be reached from the console, with the browser's
+microphone and speakers standing in for a handset — a "web call". It is
+contextualised by the same code from the same number; only the audio path
+differs (see web_call.py).
+
 Serves the demo web UI on the same port, so a single tunnel exposes both.
 
 Run it with:  ./run.ps1   (or ./run.sh, or python src/app.py)
@@ -31,12 +36,14 @@ import requests
 import websockets
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
+from flask_sock import Sock
 from openai import InvalidWebhookSignatureError, OpenAI
 
 import context
 import db
 import knowledge
 import settings_spec
+import web_call
 
 # Flask buffers stdout when it is not a TTY, which would hide the event log.
 sys.stdout.reconfigure(line_buffering=True)
@@ -74,6 +81,9 @@ app.json.ensure_ascii = False  # keep Arabic readable in API responses
 # Pick up template edits without a restart; this is a demo console, not a
 # throughput-sensitive service.
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+# WebSocket routes on the same port as everything else, so web calls work
+# through the same tunnel as the webhook and the console.
+sock = Sock(app)
 
 
 def agent_settings():
@@ -152,6 +162,54 @@ def build_accept_body(customer):
         body["max_output_tokens"] = int(max_tokens)
 
     return body
+
+
+# Written into the transcript when the service refuses the knowledge base tool
+# and the call goes ahead without it, whichever way the caller came in.
+KNOWLEDGE_DROPPED = (
+    "Knowledge base rejected by the realtime service; the call continues without it."
+)
+
+
+def without_knowledge(body):
+    """The session config minus the knowledge base, for when the service refuses it."""
+    return {key: value for key, value in body.items() if key not in ("tools", "tool_choice")}
+
+
+def contextualise(call_id, from_number, channel="phone"):
+    """Works out who is calling and what the agent should be told.
+
+    Shared by both ways of reaching the agent, so a web call from a number is
+    matched, logged, recorded and configured exactly as a phone call from that
+    number would be. Returns the matched customer, or None, and the session
+    config.
+    """
+    customer = db.find_customer_by_number(from_number) if from_number else None
+    language = (customer or {}).get("preferred_language", "en")
+    arrival = "incoming" if channel == "phone" else "web call"
+
+    if customer:
+        variant = customer.get("arabic_variant") or "default"
+        style = f" style={variant}" if language == "ar" and variant != "default" else ""
+        logger.info(
+            f"[{call_id}] {arrival} from {from_number} -> "
+            f"{customer['full_name_en']} (language={language}{style})"
+        )
+    else:
+        logger.info(f"[{call_id}] {arrival} from {from_number or 'unknown'} -> no match")
+
+    db.start_call(call_id, from_number, (customer or {}).get("id"), language, channel)
+
+    body = build_accept_body(customer)
+    # Logged so a misconfigured setting is diagnosable. Instructions are long,
+    # so only their size is recorded here.
+    logger.info(
+        f"[{call_id}] {'accept' if channel == 'phone' else 'session'} config: "
+        f"audio={json.dumps(body.get('audio', {}))} "
+        f"instructions={len(body['instructions'])} chars "
+        f"knowledge={'on' if body.get('tools') else 'off'}"
+    )
+    return customer, body
 
 
 # ---------------------------------------------------------------------------
@@ -484,9 +542,28 @@ def _record_event(call_id, event):
         logger.info(f"[{call_id}] caller transcript via {event_type}")
 
 
-async def websocket_task(call_id, customer=None):
-    """Monitors the realtime session, opens the call, and logs the transcript."""
-    url = WS_BASE + "/realtime?call_id=" + call_id
+async def websocket_task(call_id, customer=None, bridge=None):
+    """Monitors the realtime session, opens the call, and logs the transcript.
+
+    A phone call's audio travels over SIP, so for a phone call this socket only
+    observes and steers the session. A web call has no media path of its own:
+    `bridge` carries the browser's audio over this same socket, and everything
+    else — the opening, the transcript, knowledge base follow-ups and holding
+    phrases — is shared.
+    """
+    if bridge:
+        # A web call is a session of its own rather than one attached to a
+        # SIP call, so it names the deployment and is configured over the
+        # socket instead of by an accept.
+        url = WS_BASE + "/realtime?model=" + DEPLOYMENT
+    else:
+        url = WS_BASE + "/realtime?call_id=" + call_id
+
+    # A phone call's outcome was settled by its accept. A web call only counts
+    # as completed once the agent is actually on the line.
+    status = "failed" if bridge else "completed"
+    failure = "The realtime service could not be reached."
+    relay = None
     try:
         async with websockets.connect(url, additional_headers=AUTH_HEADER) as websocket:
             logger.info(f"[{call_id}] websocket connected")
@@ -495,6 +572,14 @@ async def websocket_task(call_id, customer=None):
             async def send(events):
                 for outbound in events:
                     await websocket.send(json.dumps(outbound))
+
+            if bridge:
+                failure = await _open_web_session(call_id, websocket, bridge.session, send)
+                if failure:
+                    return
+                status = "completed"
+                relay = asyncio.create_task(_relay_browser(call_id, bridge, websocket))
+                bridge.notify({"type": "web_call.connected"})
 
             # No `instructions` here on purpose: they would override the session
             # instructions for this response, stripping the dialect, profile and
@@ -516,6 +601,9 @@ async def websocket_task(call_id, customer=None):
                 except json.JSONDecodeError:
                     continue
 
+                if bridge:
+                    bridge.forward(event, message)
+
                 event_type = event.get("type") or ""
                 # Transcription events are logged in full: they are the ones
                 # worth diagnosing, and they are rare enough not to flood.
@@ -531,11 +619,92 @@ async def websocket_task(call_id, customer=None):
     except Exception as exc:
         logger.error(f"[{call_id}] websocket error: {exc}", exc_info=True)
     finally:
+        if relay:
+            relay.cancel()
+        if bridge:
+            if status == "failed":
+                bridge.fail(failure)
+            bridge.close()
         for item_id in list(_delta_buffers.get(call_id, {})):
             _flush_delta(call_id, item_id)
         _delta_buffers.pop(call_id, None)
         _mcp_state.pop(call_id, None)
-        db.end_call(call_id)
+        db.end_call(call_id, status)
+
+
+# How long a web call waits for the service to accept its session config. It
+# normally answers in well under a second.
+_SESSION_TIMEOUT_SECONDS = 10.0
+
+
+async def _open_web_session(call_id, websocket, body, send):
+    """Configures a web call's session: the WebSocket counterpart of accept.
+
+    Waits for the service to confirm before the call is opened, so the
+    greeting is generated with the caller's profile rather than the service's
+    defaults. Like accept, a session refused over the knowledge base is retried
+    without it rather than dropped. Returns None on success, or what went wrong
+    in words the console can show.
+    """
+    attempts = [body, without_knowledge(body)] if body.get("tools") else [body]
+    for attempt in attempts:
+        await websocket.send(json.dumps(web_call.session_update(attempt)))
+        try:
+            problem = await _session_outcome(call_id, websocket, send)
+        except asyncio.TimeoutError:
+            logger.error(f"[{call_id}] no session.updated within {_SESSION_TIMEOUT_SECONDS:.0f}s")
+            return "The realtime service did not respond."
+
+        if problem is None:
+            if attempt is not body:
+                db.add_transcript_line(call_id, "system", KNOWLEDGE_DROPPED)
+            return None
+
+        if attempt is body and len(attempts) > 1:
+            # Never drop a call over the knowledge base, same as accept.
+            logger.error(
+                f"[{call_id}] session rejected with knowledge base ({problem}); "
+                "retrying without it"
+            )
+        else:
+            logger.error(f"[{call_id}] session rejected: {problem}")
+
+    return "The realtime service rejected the session. The server log says why."
+
+
+async def _session_outcome(call_id, websocket, send):
+    """Waits for the service to accept or refuse a `session.update`.
+
+    Returns None once it is accepted, or the service's reason for refusing it.
+    Anything else that arrives meanwhile is handled as usual, so nothing is
+    lost from the transcript. Raises asyncio.TimeoutError if the service never
+    answers.
+    """
+    deadline = time.monotonic() + _SESSION_TIMEOUT_SECONDS
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise asyncio.TimeoutError
+        message = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+        try:
+            event = json.loads(message)
+        except json.JSONDecodeError:
+            continue
+
+        event_type = event.get("type") or ""
+        logger.info(f"[{call_id}] <- {event_type}")
+        if event_type == "session.updated":
+            return None
+        if event_type == "error":
+            return (event.get("error") or {}).get("message") or json.dumps(event)[:300]
+        await send(_handle_event(call_id, event))
+
+
+async def _relay_browser(call_id, bridge, websocket):
+    """Feeds the browser's microphone into the session; hangs up when it leaves."""
+    if await bridge.pump(websocket):
+        logger.info(f"[{call_id}] browser hung up")
+        await websocket.close()
 
 
 # ---------------------------------------------------------------------------
@@ -577,29 +746,7 @@ def webhook():
     sip_headers = _sip_headers_from_request(raw_body)
     from_number = context.caller_number(sip_headers)
 
-    customer = db.find_customer_by_number(from_number) if from_number else None
-    language = (customer or {}).get("preferred_language", "en")
-
-    if customer:
-        variant = customer.get("arabic_variant") or "default"
-        style = f" style={variant}" if language == "ar" and variant != "default" else ""
-        logger.info(
-            f"[{call_id}] incoming from {from_number} -> "
-            f"{customer['full_name_en']} (language={language}{style})"
-        )
-    else:
-        logger.info(f"[{call_id}] incoming from {from_number or 'unknown'} -> no match")
-
-    db.start_call(call_id, from_number, (customer or {}).get("id"), language)
-
-    accept_body = build_accept_body(customer)
-    # Logged so a misconfigured setting is diagnosable. Instructions are long,
-    # so only their size is recorded here.
-    logger.info(
-        f"[{call_id}] accept config: audio={json.dumps(accept_body.get('audio', {}))} "
-        f"instructions={len(accept_body['instructions'])} chars "
-        f"knowledge={'on' if accept_body.get('tools') else 'off'}"
-    )
+    customer, accept_body = contextualise(call_id, from_number)
 
     def post_accept(body):
         return requests.post(
@@ -618,15 +765,9 @@ def webhook():
                 f"[{call_id}] accept rejected with knowledge base "
                 f"({accepted.status_code} {accepted.text[:300]}); retrying without it"
             )
-            retry = {k: v for k, v in accept_body.items() if k not in ("tools", "tool_choice")}
-            accepted = post_accept(retry)
+            accepted = post_accept(without_knowledge(accept_body))
             if accepted.ok:
-                db.add_transcript_line(
-                    call_id,
-                    "system",
-                    "Knowledge base rejected by the realtime service; "
-                    "the call continues without it.",
-                )
+                db.add_transcript_line(call_id, "system", KNOWLEDGE_DROPPED)
     except requests.RequestException as exc:
         logger.error(f"[{call_id}] accept request failed: {exc}")
         db.end_call(call_id, status="failed")
@@ -644,6 +785,47 @@ def webhook():
     ).start()
 
     return Response(status=200)
+
+
+# ---------------------------------------------------------------------------
+# Web calls
+# ---------------------------------------------------------------------------
+
+
+@sock.route("/api/web-call")
+def api_web_call(ws):
+    """A call placed from the console instead of from a phone.
+
+    The browser's microphone and speakers stand in for the handset. From the
+    number onwards it is the phone call's own path: the same lookup, the same
+    session config and the same monitor. The socket stays open for the length
+    of the call, and closing it hangs up.
+    """
+    number = (request.args.get("number") or "").strip()
+    call_id = web_call.new_call_id()
+    bridge = web_call.Bridge(ws, call_id)
+
+    try:
+        customer, bridge.session = contextualise(call_id, number or None, channel="web")
+    except Exception as exc:
+        logger.error(f"[{call_id}] web call could not be set up: {exc}", exc_info=True)
+        db.end_call(call_id, status="failed")
+        bridge.fail("The call could not be set up. The server log says why.")
+        bridge.close()
+        return
+
+    bridge.notify(
+        {
+            "type": "web_call.started",
+            "call_id": call_id,
+            "number": number,
+            "matched": bool(customer),
+            "name": (customer or {}).get("full_name_en"),
+        }
+    )
+    # Runs in this request's thread, which keeps the browser's socket open for
+    # exactly as long as the call lasts.
+    asyncio.run(websocket_task(call_id, customer, bridge))
 
 
 # ---------------------------------------------------------------------------

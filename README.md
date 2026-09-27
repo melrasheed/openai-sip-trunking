@@ -2,7 +2,8 @@
 
 A demo phone agent that **recognises the caller from their number before it answers**, greets them
 by name in their preferred language, and can discuss their account. Ships with a web console for
-managing the customer data and watching calls live.
+managing the customer data and watching calls live, and a **Web call** button that reaches the
+same agent through the browser's microphone and speakers when the phone line will not cooperate.
 
 Built on the
 [OpenAI SIP guide](https://developers.openai.com/api/docs/guides/voice-sip?api=realtime),
@@ -27,6 +28,9 @@ adapted for [Azure OpenAI](https://learn.microsoft.com/azure/foundry/openai/how-
 The contextualisation happens **before** the call is accepted, because `sip_headers` arrives on the
 webhook. The model therefore knows who it is talking to from its very first word, rather than being
 told mid-conversation.
+
+A [web call](#web-calls--the-agent-without-a-phone-line) takes the same steps 2–4 from the same
+number; only the audio travels differently, over a WebSocket through this app instead of over SIP.
 
 ---
 
@@ -85,9 +89,11 @@ You can see exactly what any number would produce, without placing a call, from 
 - A **realtime model deployment** (for example `gpt-realtime`).
   > ⚠️ The `model` field sent at accept time must be your **deployment name**, not the model name.
 - Role assignment **Cognitive Services User** or **Cognitive Services Contributor**.
-- A **Vonage** account with a voice-capable number.
+- A **Vonage** account with a voice-capable number — for phone calls only; web calls need none.
 - **Python 3.10 or later**.
-- For local development, the [`devtunnel` CLI](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started).
+- For local development, the [`devtunnel` CLI](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started)
+  — again for phone calls, which need a public webhook.
+- For web calls, **Edge or Chrome** and a microphone.
 
 ---
 
@@ -155,7 +161,8 @@ webhook, so one tunnel exposes both. Light and dark themes, and an Arabic toggle
 whole console to right-to-left.
 
 > ⚠️ **No authentication.** Anyone who can reach the URL — including through your dev tunnel — can
-> read and edit the customer records. It is a demo console: keep the data fictional.
+> read and edit the customer records, and place web calls that run realtime sessions billed to your
+> Azure resource. It is a demo console: keep the data fictional, and the tunnel URL to yourself.
 
 **Overview** — headline numbers (customers, calls today, recognition rate, average duration) and a
 live indicator while a call is in progress.
@@ -163,16 +170,24 @@ live indicator while a call is in progress.
 **Customers** — the records the agent matches against, searchable by name or number. Selecting a
 row opens a slide-over editor grouped into Identity, Contact and language, Account, and Activity
 and service. Arabic names render right-to-left, and an **Arabic style** selector appears when the
-preferred language is Arabic. "Reseed" restores the eight sample customers.
+preferred language is Arabic. "Reseed" restores the eight sample customers. Every row, and the
+editor, has a **Web call** button that calls the agent as that customer from the browser — see
+[Web calls](#web-calls--the-agent-without-a-phone-line).
 
-**Calls** — every call, with the number it came from, which customer it matched, and the outcome.
+**Calls** — every call, with the number it came from, whether it came in by **Phone** or **Web**,
+which customer it matched, and the outcome.
 The table refreshes itself every few seconds (and pauses while the tab is hidden), so there is
 nothing to press. Selecting a call shows the transcript as a conversation; a call in progress
 updates live, and an indicator shows whether caller transcription is arriving.
 
 **Agent settings** — the basic and advanced realtime settings, the delivery style, the full
 editable system prompt, and the Arabic style prompts. The preview panel renders the exact
-instructions and audio payload that any number would produce, without placing a call.
+instructions and audio payload that any number would produce, without placing a call — and its
+**Web call** button places one from whatever number is typed, including one that matches nobody.
+
+While a web call is live, a call card sits at the bottom of the sidebar on every view: who is
+calling, a timer, whether the agent or you are speaking, **Mute** and **Hang up**. Its **Live
+transcript** is collapsed by default and deliberately quiet; **Open in Calls** jumps to the full one.
 
 Each view is deep-linkable: `?view=customers`, `?view=calls`, `?view=settings`.
 
@@ -258,6 +273,70 @@ Watch the log, or the **Calls** tab:
 
 ---
 
+## Web calls — the agent without a phone line
+
+A SIP trunk has bad days, and a demo is a bad day to find out. **Web call** reaches the same agent
+from the console, with your computer's microphone and speakers standing in for the handset. There
+is nothing extra to configure, and it does not go through the trunk, the webhook or the tunnel, so
+it keeps working when any of them is having one of those days.
+
+Press **Web call** on a customer's row (or in their editor) and the agent answers as if that
+customer had rung from their registered mobile: greeted by name, in their language and Arabic
+style, with their account in context, the knowledge base and holding phrases behaving as they do on
+the phone. The **Web call** button in *Agent settings → Preview* calls from whatever number is
+typed there, so an unrecognised caller can be shown too. The console stays where you are, and the
+call is logged in **Calls** like any other, marked **Web**.
+
+```
+  🎤 Browser mic ── PCM16 24 kHz ──▶  WS /api/web-call?number=+974…   (this app, same port)
+  🔊 <audio>    ◀── agent audio ───      │  1. same number lookup as a phone call
+                                         │  2. same session config, applied with session.update
+                                         ▼  3. same monitor: greeting, transcript, knowledge base
+                           WSS …/openai/v1/realtime?model=<deployment>
+```
+
+**Only the audio path is new.** A phone call's audio travels over SIP, so the server only watches
+the session through `…/realtime?call_id=…`. A web call has no media path of its own, so the browser
+streams its microphone to this app, which relays it into a Realtime session over the same kind of
+socket, and relays the agent's voice back. From the number onwards it runs the phone call's own
+code: `contextualise()` for the lookup, the log line and the call record; `build_accept_body()` for
+the session; `websocket_task()` for everything that happens during the call. `src/web_call.py`
+holds only the differences:
+
+- The accept payload becomes a `session.update`, sent before the greeting and confirmed by
+  `session.updated`, so the agent's first word is already contextualised. A session refused over
+  the knowledge base is retried without it, exactly as an accept is.
+- Two additions that only make sense off the phone network: explicit 24 kHz PCM formats, and
+  `noise_reduction: far_field`, because a laptop or meeting-room microphone hears the whole room
+  where a handset hears one person. The phone path is unchanged.
+- Only the agent's audio and voice-activity events are passed to the browser. The session events
+  carry the instructions and the search key, so they never leave the server, and the browser can
+  send nothing but audio, a truncation, or a hang-up.
+
+**Echo.** On laptop or room speakers the microphone hears the agent, and an agent that hears itself
+cuts itself off. The console plays the agent through a local, in-browser peer connection into an
+`<audio>` element, a path Chromium's echo canceller always covers — in Edge as well as Chrome.
+You can still talk over the agent: playback stops at once and the service is told how much of the
+reply you actually heard.
+
+**Requirements.** Edge or Chrome, and the console opened on `http://127.0.0.1:<port>/`,
+`http://localhost:<port>/`, or `https://` (a dev tunnel URL works) — browsers only grant the
+microphone to a secure origin. Allow the microphone the first time; choose **Allow on every visit**
+so it does not ask again in front of an audience. The browser's default microphone is used, so
+pick your headset or speakerphone in the site settings if it is not the default.
+
+A web call's log reads like a phone call's, from `web call` instead of `incoming`:
+
+```
+[web_...] web call from +97455512345 -> Ahmed Al-Mansouri (language=en)
+[web_...] session config: audio={...} instructions=3737 chars knowledge=on
+[web_...] websocket connected
+[web_...] <- session.updated
+[web_...] browser hung up
+```
+
+---
+
 ## Testing without placing a call
 
 ```bash
@@ -290,23 +369,27 @@ This drives the follow-up state machine through every event order that matters �
 finishing before the response and after it, the caller interrupting, a search that never comes
 back — and confirms no bare currency code reaches the model for any seeded customer.
 
+For a full rehearsal with no phone involved, place a [web call](#web-calls--the-agent-without-a-phone-line)
+from the console: it runs the lookup, the session config and the monitor for real, end to end.
+
 ---
 
 ## Project layout
 
 ```
 src/
-  app.py                Flask: webhook, JSON API, console route, realtime monitor
+  app.py                Flask: webhook, web call socket, JSON API, console route, realtime monitor
   db.py                 SQLite schema, migrations, seed data, queries
   context.py            SIP header parsing, number matching, profile and dialect assembly
   knowledge.py          Azure AI Search knowledge base as a remote MCP tool
   settings_spec.py      Realtime settings: defaults, ranges, accept-payload construction
+  web_call.py           What a web call adds: session.update, event allowlist, browser audio bridge
   prompts/
     system_template.txt The whole system prompt, with {placeholders} for the per-caller sections
     faseeh_arabic.txt   Modern Standard Arabic style prompt
     qatari_dialect.txt  Doha dialect style prompt
   templates/
-    index.html          The console (inline CSS/JS, no build step)
+    index.html          The console, including the web call audio engine (inline CSS/JS, no build step)
 scripts/
   webhook_endpoints.py  create | list | delete webhook endpoints
   send_test_webhook.py  Locally signed webhook for offline testing
@@ -330,6 +413,9 @@ Trunks differ in how much of the number they send, so matching is deliberately f
 
 That means `+97455512345`, `97455512345`, `0097455512345` and `55512345` all find the same person,
 while anonymous callers (`sip:anonymous@anonymous.invalid`) correctly find nobody.
+
+A web call skips step 1 — the number comes from the button, not a SIP header — and goes through
+steps 2 and 3 unchanged, so a web call from a number finds exactly who a phone call from it would.
 
 ---
 
@@ -679,6 +765,11 @@ If `.failed` says the model cannot be resolved, change **Transcription model** i
 | The agent chats about anything asked | The scope rules live in the template. Check they are still there — **Reset to default** restores them — and remember an edit applies from the next call, not the one in progress. |
 | The first sentence ignores the Arabic style | Something is sending `instructions` on `response.create`; that replaces the session instructions for that one response. The opening belongs in the template's `{opening}`. |
 | Tunnel worked yesterday, not today | Dev tunnels expire (30 days maximum). Recreate it and re-register the webhook URL. |
+| Web call: "Microphone blocked" | The browser was refused the microphone. Allow it from the icon in the address bar, then press **Web call** again. |
+| Web call: "Web calls need the console on https or localhost" | The console was opened over plain `http://` on another address (a LAN IP, say). Use `http://127.0.0.1:<port>/` on the same machine, or the `https://` tunnel URL. |
+| Web call: "The realtime service could not be reached" or "rejected the session" | The server log has the reason on the `[web_…]` lines — the same `AZURE_OPENAI_*` values a phone call uses, so a 401 or a wrong deployment name fails both. |
+| Web call connects but the agent is silent | Check the output device and volume. A browser warning `Loopback playback unavailable` means the echo-cancelled path could not start and audio plays directly instead: it works, but use a headset. |
+| On speakers the agent keeps cutting itself off | The room is loud enough to count as speech. Lower the speaker volume, raise **Speech threshold** in **Agent settings → Advanced** (it applies to phone calls too), or use a headset. |
 
 ---
 
@@ -688,6 +779,8 @@ If `.failed` says the model cannot be resolved, change **Transcription model** i
 - The `openai` package is used **only** to verify webhook signatures; no request is ever sent to
   `api.openai.com`.
 - Only stdlib `sqlite3` is used for storage — there is no ORM and no database server to run.
+- `flask-sock` serves the web call WebSocket on the same port as everything else, so localhost and
+  a dev tunnel both carry it without extra setup.
 - The Flask development server is fine for a demo. Put a real WSGI server in front of it before
   using this for anything else.
 

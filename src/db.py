@@ -52,6 +52,9 @@ CUSTOMER_FIELDS = [
 # number is usually in there.
 MIGRATIONS = [
     ("customers", "arabic_variant", "TEXT NOT NULL DEFAULT 'default'"),
+    # How the caller reached the agent: 'phone' over the SIP trunk, or 'web'
+    # from the console. Calls logged before this column existed were phone calls.
+    ("calls", "channel", "TEXT NOT NULL DEFAULT 'phone'"),
 ]
 
 SCHEMA = """
@@ -91,6 +94,7 @@ CREATE TABLE IF NOT EXISTS calls (
     matched      INTEGER NOT NULL DEFAULT 0,
     language     TEXT,
     status       TEXT NOT NULL DEFAULT 'ringing',
+    channel      TEXT NOT NULL DEFAULT 'phone',
     started_at   TEXT NOT NULL,
     ended_at     TEXT
 );
@@ -381,19 +385,28 @@ def delete_customer(customer_id):
 # ---------------------------------------------------------------------------
 
 
-def start_call(call_id, from_number, customer_id, language):
+def start_call(call_id, from_number, customer_id, language, channel="phone"):
     with _write_lock, connect() as conn:
         conn.execute(
             """INSERT INTO calls (call_id, from_number, customer_id, matched, language,
-                                  status, started_at)
-               VALUES (?, ?, ?, ?, ?, 'in_progress', ?)
+                                  status, channel, started_at)
+               VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?)
                ON CONFLICT(call_id) DO UPDATE SET
                    from_number = excluded.from_number,
                    customer_id = excluded.customer_id,
                    matched     = excluded.matched,
                    language    = excluded.language,
+                   channel     = excluded.channel,
                    status      = 'in_progress'""",
-            (call_id, from_number, customer_id, 1 if customer_id else 0, language, now_iso()),
+            (
+                call_id,
+                from_number,
+                customer_id,
+                1 if customer_id else 0,
+                language,
+                channel,
+                now_iso(),
+            ),
         )
 
 

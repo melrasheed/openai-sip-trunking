@@ -64,8 +64,9 @@ resource site 'Microsoft.Web/sites@2023-12-01' = {
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       healthCheckPath: '/health'
-      // The app dials out to Azure OpenAI over WSS; inbound WebSocket support
-      // is not required and is intentionally left off.
+      // The app dials out to Azure OpenAI over WSS, and the console's web
+      // calls stream the browser's audio in over a WebSocket.
+      webSocketsEnabled: true
       appCommandLine: 'npm start'
       appSettings: [
         {
